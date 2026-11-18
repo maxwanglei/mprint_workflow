@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 
 import duckdb
 
-_TABLES = ("concepts", "synonyms", "relationships", "xrefs", "product_evidence")
+from .schema import DUCKDB_CONFIG, OUTPUTS, read_table_csv
 
 
 def normalize_name(value: str) -> str:
@@ -27,17 +27,12 @@ def build_bundle(tables: Path, output: Path, declaration: dict) -> None:
         staging = Path(tmp) / "bundle"
         staging.mkdir()
         database = staging / "lexicon.duckdb"
-        with duckdb.connect(str(database)) as con:
-            for table in _TABLES:
+        with duckdb.connect(str(database), config=DUCKDB_CONFIG) as con:
+            for table, spec in OUTPUTS.items():
                 path = tables / f"{table}.csv"
                 if table == "product_evidence" and not path.is_file():
                     continue
-                # Preserve leading zeroes in native codes and never convert dates or names.
-                con.execute(
-                    f"CREATE TABLE {table} AS SELECT * FROM "
-                    "read_csv(?, header=true, all_varchar=true, delim=',', quote='\"', escape='\"')",
-                    [str(path)],
-                )
+                read_table_csv(con, path, spec).create(table)
                 counts[table] = con.execute(f"SELECT count(*) FROM {table}").fetchall()[0][0]
 
             con.execute("CREATE TEMP TABLE aliases(raw VARCHAR, canonical VARCHAR)")

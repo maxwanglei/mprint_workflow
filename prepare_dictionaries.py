@@ -34,6 +34,7 @@ from .schema import (
     TABLES,
     _text,
     load_declaration,
+    read_table_csv,
     validate_aliases,
     validate_declaration,
 )
@@ -127,6 +128,7 @@ class TableSink:
 
     def add(self, table, **row):
         spec = OUTPUTS[table]
+        row = {k: v.strip() if isinstance(v, str) else v for k, v in row.items()}
         if table not in self.writers:
             self.open_table(spec)
         for column in spec.required:
@@ -190,18 +192,15 @@ def merge_aliases(existing, incoming):
         existing[original] = name
 
 
-def check_keys(directory, declaration, scratch):
-    """Validate concept uniqueness and qualified references before publishing CSVs."""
+def publish_tables(raw, staging, declaration, scratch):
+    """Validate the raw tables, then write each one sorted and without identical rows."""
     with duckdb.connect(str(scratch / "checks.duckdb"), config=DUCKDB_CONFIG) as db:
-        for name in OUTPUTS:
-            if not (directory / f"{name}.csv").exists():
-                continue
-            db.read_csv(
-                str(directory / f"{name}.csv"), header=True, all_varchar=True, delimiter=","
-            ).create_view(name)
+        present = [name for name in OUTPUTS if (raw / f"{name}.csv").exists()]
+        for name in present:
+            read_table_csv(db, raw / f"{name}.csv", OUTPUTS[name]).create_view(name)
         invalid = db.execute(
             "SELECT vocabulary_id, concept_code FROM concepts "
-            "WHERE (status IS NOT NULL AND lower(status) NOT IN (SELECT unnest(?))) "
+            "WHERE (status IS NOT NULL AND status NOT IN (SELECT unnest(?))) "
             "OR (valid_start_date IS NOT NULL AND try_strptime(valid_start_date, '%Y-%m-%d') IS NULL) "
             "OR (valid_end_date IS NOT NULL AND try_strptime(valid_end_date, '%Y-%m-%d') IS NULL) LIMIT 1",
             [list(CONCEPT_STATUSES)],
@@ -236,7 +235,7 @@ def check_keys(directory, declaration, scratch):
             ("relationships", "_1"),
             ("relationships", "_2"),
         ]
-        if (directory / "product_evidence.csv").exists():
+        if "product_evidence" in present:
             references.append(("product_evidence", ""))
         for table, suffix in references:
             missing = db.execute(
@@ -246,6 +245,15 @@ def check_keys(directory, declaration, scratch):
             ).fetchone()
             if missing:
                 raise ValueError(f"{table}: missing concept {missing}")
+        counts = Counter()
+        for name in present:
+            distinct = "" if name == "concepts" else "DISTINCT "
+            target = str(staging / f"{name}.csv").replace("'", "''")
+            (counts[name],) = db.execute(
+                f"COPY (SELECT {distinct}* FROM {name} ORDER BY ALL) TO '{target}' "
+                "(HEADER, DELIMITER ',', QUOTE '\"', ESCAPE '\"')"
+            ).fetchone()
+    return counts
 
 
 def validate_source(settings):
@@ -293,8 +301,10 @@ def prepare(config_path, output, only, compile_bundle):
         scratch = Path(tmp)
         staging = scratch / "output"
         staging.mkdir()
+        raw = scratch / "raw"
+        raw.mkdir()
         with ExitStack() as stack:
-            sink = TableSink(config_path.parent, staging, stack)
+            sink = TableSink(config_path.parent, raw, stack)
             for name, settings in sources.items():
                 if only and name not in only:
                     continue
@@ -338,15 +348,15 @@ def prepare(config_path, output, only, compile_bundle):
         declaration = validate_declaration(
             {"vocabularies": vocabularies, "source_aliases": aliases}
         )
-        check_keys(staging, declaration, scratch)
+        counts = publish_tables(raw, staging, declaration, scratch)
         (staging / "vocabularies.yaml").write_text(
-            yaml.safe_dump(declaration, sort_keys=False),
+            yaml.safe_dump(declaration, sort_keys=False, allow_unicode=True),
             encoding="utf-8",
         )
         if compile_bundle:
             build_bundle(staging, staging / "bundle", declaration)
         staging.rename(output)
-    return sink.counts
+    return counts
 
 
 def main():

@@ -11,6 +11,8 @@ from typing import Any
 import duckdb
 import yaml
 
+from .schema import DUCKDB_CONFIG
+
 _RXNORM_CLASSES = {
     "Ingredient": "IN",
     "Precise Ingredient": "PIN",
@@ -108,10 +110,7 @@ def import_athena(config: Mapping[str, Any], source: Path, work: Path) -> Path:
         scratch = Path(temporary)
         staged = scratch / "tables"
         staged.mkdir()
-        with duckdb.connect(
-            str(scratch / "working.duckdb"),
-            config={"autoinstall_known_extensions": False, "autoload_known_extensions": False},
-        ) as db:
+        with duckdb.connect(str(scratch / "working.duckdb"), config=DUCKDB_CONFIG) as db:
             _read_inputs(db, source, need_domain=bool(domains))
             versions = db.execute(
                 """

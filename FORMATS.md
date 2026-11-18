@@ -105,7 +105,7 @@ Set `path` to a directory containing `vocabularies.yaml` and one `concepts.csv`,
 
 ## Output tables
 
-CSV files use UTF-8, comma separators, a header, and standard CSV quoting. All columns are text, including dates, identifiers, strength, application numbers and product numbers. Read them as strings to preserve leading zeroes. Optional fields with no value are empty in CSV and ordinarily `NULL` in the database. A field marked **required** must be present and nonblank on every row.
+CSV files use UTF-8, comma separators, a header, and standard CSV quoting. Rows are sorted, fields carry no leading or trailing whitespace, and no table repeats an identical row. All columns are text, including dates, identifiers, strength, application numbers and product numbers. Read them as strings to preserve leading zeroes. Optional fields with no value are empty in CSV and ordinarily `NULL` in the database. A field marked **required** must be present and nonblank on every row.
 
 ### `concepts.csv`
 
@@ -117,7 +117,7 @@ One row per `(vocabulary_id, concept_code)`. Names can repeat. When joining any 
 | `concept_code` **required** | Code within that namespace, such as `C99900001` or `000123-002`. |
 | `concept_name` **required** | Preferred display and lookup name selected by the reader. |
 | `concept_class` | Source classification, such as an RxNorm term type, NCIt semantic type list, or `FDA drug product`. |
-| `status` | Accepted lifecycle values are `active`, `not_current`, `remapped`, `quantified`, `obsolete`, `never_active`, and `unknown`. Blank means no value supplied. |
+| `status` | Accepted lifecycle values are `active`, `not_current`, `remapped`, `quantified`, `obsolete`, `never_active`, and `unknown`, in lowercase exactly. Blank means no value supplied. |
 | `valid_start_date`, `valid_end_date` | Start and end of source validity as `YYYY-MM-DD` when supplied. |
 | `replaced_by` | Replacement `concept_code` within the same `vocabulary_id`, when supplied. |
 | `name_source` | Authority asserting the preferred name. Raw source spelling is retained here. For lookups an empty value falls back to `vocabulary_id`. |

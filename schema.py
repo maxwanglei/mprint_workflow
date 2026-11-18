@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import duckdb
 import yaml
 
 
@@ -63,6 +64,19 @@ CONCEPT_STATUSES = (
     "never_active",
     "unknown",
 )
+
+
+def read_table_csv(con: duckdb.DuckDBPyConnection, path: Path, spec: TableSpec):
+    """Read a prepared table in the exact dialect TableSink and publish_tables write."""
+    return con.read_csv(
+        str(path),
+        columns=dict.fromkeys(spec.columns, "VARCHAR"),
+        header=True,
+        delimiter=",",
+        quotechar='"',
+        escapechar='"',
+        auto_detect=False,
+    )
 
 
 def _text(value, label):
