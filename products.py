@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -169,19 +170,27 @@ def read_article57(config: Mapping[str, Any], sink: Any) -> None:
         "marketing authorisation holder",
     ]
     code_column = config.get("code_column")
+    required_columns = required + ([code_column.casefold()] if code_column else [])
     header: list[str] = []
+    incomplete = ""
     names_by_code: dict[str, set[str]] = {}
     for number, cells in enumerate(_article_rows(path, config), 1):
         if not header:
             candidate = _article_header(cells)
             if "product name" not in candidate:
                 continue
-            required_columns = required + ([code_column.casefold()] if code_column else [])
             missing = set(required_columns) - set(candidate)
             if missing:
-                raise ValueError(f"{path}:{number}: missing Article 57 column(s) {sorted(missing)}")
+                incomplete = incomplete or (
+                    f"{path}:{number}: missing Article 57 column(s) {sorted(missing)}"
+                )
+                continue
+            repeated = sorted(c for c, n in Counter(filter(None, candidate)).items() if n > 1)
+            if repeated:
+                raise ValueError(f"{path}:{number}: duplicate Article 57 column(s) {repeated}")
             header = candidate
             continue
+        cells = [*cells, *[None] * (len(header) - len(cells))]
         row = {
             key: "" if value is None else str(value).strip()
             for key, value in zip(header, cells, strict=False)
@@ -240,4 +249,4 @@ def read_article57(config: Mapping[str, Any], sink: Any) -> None:
             )
         names.add(name)
     if not header:
-        raise ValueError(f"{path}: Article 57 product header not found")
+        raise ValueError(incomplete or f"{path}: Article 57 product header not found")
