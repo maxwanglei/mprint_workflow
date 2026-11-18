@@ -42,7 +42,7 @@ OMOP invalid reasons `D` and `U` become `obsolete` and `remapped`. The reader em
 
 Required `mrconso` points to `META/MRCONSO.RRF` and `sources` is a nonempty list of source abbreviations, for example `[RXNORM, MSH, NCI, SNOMEDCT_US, DRUGBANK]`. Optional `language` is a three-letter uppercase `LAT` value (default `ENG`). Optional `ttys` is a nonempty list of allowed term types across the selected sources. For a drug-oriented selection, the example uses RxNorm `IN`, `PIN`, `MIN`, `BN`, `SCD`, `SBD`, MeSH `MH`, `NM`, and `PT`, `SY` where the selected source uses them. Check the term types in your release before expanding the set. [NLM MRCONSO fields](https://www.ncbi.nlm.nih.gov/books/NBK9685/table/ch03.T.concept_names_and_sources_file_mr/)
 
-To select CUIs by semantic type, supply both `mrsty` (path to `META/MRSTY.RRF`) and `semantic_types` (a nonempty list of TUI strings such as `[T121, T195, T200]`). A CUI qualifies if it has any selected TUI. Without this pair the reader uses the atom filters alone. Temporary SQLite storage holds eligible CUIs and atoms during preparation. [NLM MRSTY fields](https://www.ncbi.nlm.nih.gov/books/NBK9685/table/ch03.Tf/)
+To select CUIs by semantic type, supply both `mrsty` (path to `META/MRSTY.RRF`) and `semantic_types` (a nonempty list of TUI strings such as `[T121, T195, T200]`). A CUI qualifies if it has any selected TUI. Without this pair the reader uses the atom filters alone. Temporary SQLite storage holds eligible CUIs and atoms during preparation, in a scratch directory beside the output rather than the system temporary directory. [NLM MRSTY fields](https://www.ncbi.nlm.nih.gov/books/NBK9685/table/ch03.Tf/)
 
 Both files accept plain UTF-8 or `.gz`, have no header, and require a trailing `|` on each row. Keep empty fields in position. The layouts in native order are
 
@@ -51,7 +51,7 @@ CUI|LAT|TS|LUI|STT|SUI|ISPREF|AUI|SAUI|SCUI|SDUI|SAB|TTY|CODE|STR|SRL|SUPPRESS|C
 CUI|TUI|STN|STY|ATUI|CVF|
 ```
 
-Only atoms with `SUPPRESS=N` enter the dictionary. For each retained CUI the reader prioritizes `TS=P`, `STT=PF` and `ISPREF=Y` in that order, then breaks ties by name, source abbreviation and term type. Each eligible atom contributes its wording, original SAB and TTY. Native-code cross-references require one-to-one correspondence within the selected atoms and one of the supported source namespaces (`RxNorm`, `MeSH`, `NCIt`, `SNOMED`, `DrugBank`). For MeSH, only `MH` descriptor headings and `NM` supplementary record names qualify for these links. All retained CUIs also carry an explicit `UMLS_CUI` key.
+Only atoms with `SUPPRESS=N` enter the dictionary. For each retained CUI the reader prioritizes `TS=P`, `STT=PF` and `ISPREF=Y` in that order, then breaks ties by name, source abbreviation and term type. Each eligible atom contributes its wording, original SAB and TTY. Native-code cross-references require one-to-one correspondence across all unsuppressed atoms of the selected sources and language, before the `ttys` and semantic-type filters, and one of the supported source namespaces (`RxNorm`, `MeSH`, `NCIt`, `SNOMED`, `DrugBank`). For MeSH, only `MH` descriptor headings and `NM` supplementary record names qualify for these links. All retained CUIs also carry an explicit `UMLS_CUI` key.
 
 ### `mesh` — MeSH descriptors and supplementary concept records
 

@@ -63,19 +63,22 @@ def _rrf(path: Path, columns: int) -> Iterator[tuple[int, list[str]]]:
 
 def _atoms(
     path: Path, sources: set[str], language: str, ttys: set[str] | None
-) -> Iterator[tuple[str, str, str, str, int, str | None, str]]:
+) -> Iterator[tuple[str, str, str, str, int, str | None, str, bool]]:
     for number, fields in _rrf(path, 18):
         cui, lat, ts, _, stt, _, ispref, _, _, _, _, sab, tty, code, name, _, suppress, _ = fields
         if lat != language or sab not in sources or suppress != "N":
             continue
-        if ttys is not None and tty not in ttys:
+        kept = ttys is None or tty in ttys
+        key = _native_key(sab, tty, code)
+        # An atom outside the TTY filter still counts toward code cardinality.
+        if not kept and key is None:
             continue
         if not cui or not name.strip() or not tty:
             raise ValueError(f"{path}:{number}: missing UMLS CUI, name or term type")
         # P/PF/Y identifies the preferred atom. A filtered subset can
         # lack that atom; rank retained names deterministically in that case.
         rank = 4 * (ts != "P") + 2 * (stt != "PF") + (ispref != "Y")
-        yield cui, name.strip(), sab, tty, rank, _native_key(sab, tty, code), code
+        yield cui, name.strip(), sab, tty, rank, key, code, kept
 
 
 def read_umls(config: Mapping[str, Any], sink: Any) -> None:
@@ -88,83 +91,97 @@ def read_umls(config: Mapping[str, Any], sink: Any) -> None:
     if not isinstance(language, str) or not re.fullmatch("[A-Z]{3}", language):
         raise ValueError("UMLS language must be a three-letter MRCONSO LAT value such as ENG")
     path = Path(sink.path(config["mrconso"]))
-    vocabulary = config["vocabulary_id"]
     # Source subsets and release files need not arrive in CUI order. Spill the
     # eligible atoms and sort on disk so release size does not bound available RAM.
     with (
-        TemporaryDirectory() as directory,
+        TemporaryDirectory(dir=sink.scratch) as directory,
         closing(sqlite3.connect(Path(directory) / "atoms.sqlite")) as db,
     ):
         db.execute("PRAGMA temp_store=FILE")
-        db.execute(
-            "CREATE TABLE atoms(cui TEXT, name TEXT, sab TEXT, tty TEXT, "
-            "rank INTEGER, key_type TEXT, code TEXT)"
+        # Sort spill files otherwise go to the system temp directory, whatever
+        # the database location. The setting is process-wide, so restore it.
+        db.execute(f"PRAGMA temp_store_directory = '{directory.replace(chr(39), chr(39) * 2)}'")
+        try:
+            _read_atoms(config, sink, db, path, sources, language, ttys)
+        finally:
+            db.execute("PRAGMA temp_store_directory = ''")
+
+
+def _read_atoms(
+    config: Mapping[str, Any],
+    sink: Any,
+    db: sqlite3.Connection,
+    path: Path,
+    sources: set[str],
+    language: str,
+    ttys: set[str] | None,
+) -> None:
+    vocabulary = config["vocabulary_id"]
+    db.execute(
+        "CREATE TABLE atoms(cui TEXT, name TEXT, sab TEXT, tty TEXT, "
+        "rank INTEGER, key_type TEXT, code TEXT, kept INTEGER)"
+    )
+    insert = "INSERT INTO atoms SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8"
+    if "mrsty" in config:
+        types = _allowed(config, "semantic_types")
+        if not all(re.fullmatch(r"T[0-9]{3}", value) for value in types):
+            raise ValueError("UMLS semantic_types must contain TUIs such as T121")
+        db.execute("CREATE TABLE eligible(cui TEXT PRIMARY KEY) WITHOUT ROWID")
+        db.executemany(
+            "INSERT OR IGNORE INTO eligible VALUES (?)",
+            ((row[0],) for _, row in _rrf(Path(sink.path(config["mrsty"])), 6) if row[1] in types),
         )
-        insert = "INSERT INTO atoms SELECT ?, ?, ?, ?, ?, ?, ?"
-        if "mrsty" in config:
-            types = _allowed(config, "semantic_types")
-            if not all(re.fullmatch(r"T[0-9]{3}", value) for value in types):
-                raise ValueError("UMLS semantic_types must contain TUIs such as T121")
-            db.execute("CREATE TABLE eligible(cui TEXT PRIMARY KEY) WITHOUT ROWID")
-            db.executemany(
-                "INSERT OR IGNORE INTO eligible VALUES (?)",
-                (
-                    (row[0],)
-                    for _, row in _rrf(Path(sink.path(config["mrsty"])), 6)
-                    if row[1] in types
-                ),
-            )
-            insert += " WHERE ?1 IN (SELECT cui FROM eligible)"
-        db.executemany(insert, _atoms(path, sources, language, ttys))
-        previous = None
-        for cui, name, sab, tty in db.execute(
-            "SELECT cui, name, sab, tty FROM atoms ORDER BY cui, rank, name, sab, tty"
-        ):
-            if cui != previous:
-                sink.add(
-                    "concepts",
-                    vocabulary_id=vocabulary,
-                    concept_code=cui,
-                    concept_name=name,
-                    concept_class="UMLS concept",
-                    name_source=sab,
-                )
-                sink.add(
-                    "xrefs",
-                    vocabulary_id=vocabulary,
-                    concept_code=cui,
-                    key_type="UMLS_CUI",
-                    key_value=cui,
-                    assertion_source="UMLS",
-                )
-                previous = cui
+        insert += " AND ?1 IN (SELECT cui FROM eligible)"
+    db.executemany(insert, _atoms(path, sources, language, ttys))
+    previous = None
+    for cui, name, sab, tty in db.execute(
+        "SELECT cui, name, sab, tty FROM atoms WHERE kept ORDER BY cui, rank, name, sab, tty"
+    ):
+        if cui != previous:
             sink.add(
-                "synonyms",
+                "concepts",
                 vocabulary_id=vocabulary,
                 concept_code=cui,
-                synonym=name,
-                synonym_type=tty,
-                source=sab,
+                concept_name=name,
+                concept_class="UMLS concept",
+                name_source=sab,
             )
-        if previous is None:
-            raise ValueError(f"{path}: no unsuppressed UMLS atoms match the requested filters")
-
-        # UMLS can collapse several source codes to one CUI, or split one
-        # source code across CUIs. Neither establishes a unique identity.
-        rows = db.execute(
-            "WITH pairs AS (SELECT DISTINCT cui, key_type, code FROM atoms "
-            "WHERE key_type IS NOT NULL), counted AS (SELECT *, "
-            "count(*) OVER (PARTITION BY cui, key_type) AS codes_per_cui, "
-            "count(*) OVER (PARTITION BY key_type, code) AS cuis_per_code FROM pairs) "
-            "SELECT cui, key_type, code FROM counted WHERE codes_per_cui=1 AND cuis_per_code=1 "
-            "ORDER BY cui, key_type"
-        )
-        for cui, key_type, code in rows:
             sink.add(
                 "xrefs",
                 vocabulary_id=vocabulary,
                 concept_code=cui,
-                key_type=key_type,
-                key_value=code,
+                key_type="UMLS_CUI",
+                key_value=cui,
                 assertion_source="UMLS",
             )
+            previous = cui
+        sink.add(
+            "synonyms",
+            vocabulary_id=vocabulary,
+            concept_code=cui,
+            synonym=name,
+            synonym_type=tty,
+            source=sab,
+        )
+    if previous is None:
+        raise ValueError(f"{path}: no unsuppressed UMLS atoms match the requested filters")
+
+    # UMLS can collapse several source codes to one CUI, or split one
+    # source code across CUIs. Neither establishes a unique identity.
+    rows = db.execute(
+        "WITH pairs AS (SELECT DISTINCT cui, key_type, code FROM atoms "
+        "WHERE key_type IS NOT NULL), counted AS (SELECT *, "
+        "count(*) OVER (PARTITION BY cui, key_type) AS codes_per_cui, "
+        "count(*) OVER (PARTITION BY key_type, code) AS cuis_per_code FROM pairs) "
+        "SELECT cui, key_type, code FROM counted WHERE codes_per_cui=1 AND cuis_per_code=1 "
+        "AND cui IN (SELECT cui FROM atoms WHERE kept) ORDER BY cui, key_type"
+    )
+    for cui, key_type, code in rows:
+        sink.add(
+            "xrefs",
+            vocabulary_id=vocabulary,
+            concept_code=cui,
+            key_type=key_type,
+            key_value=code,
+            assertion_source="UMLS",
+        )

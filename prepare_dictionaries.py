@@ -106,8 +106,9 @@ INPUT_ERRORS = (
 class TableSink:
     """Stream normalized dictionary tables to disk and create evidence output on first use."""
 
-    def __init__(self, source_root, destination, stack):
+    def __init__(self, source_root, destination, stack, scratch):
         self.source_root = source_root
+        self.scratch = scratch
         self.counts = Counter()
         self.writers = {}
         self.stack = stack
@@ -304,7 +305,7 @@ def prepare(config_path, output, only, compile_bundle):
         raw = scratch / "raw"
         raw.mkdir()
         with ExitStack() as stack:
-            sink = TableSink(config_path.parent, raw, stack)
+            sink = TableSink(config_path.parent, raw, stack, scratch)
             for name, settings in sources.items():
                 if only and name not in only:
                     continue

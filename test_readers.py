@@ -3,6 +3,7 @@
 import gzip
 import io
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -146,3 +147,41 @@ def test_mesh_descriptor_aliases_and_unii(run_source, read_rows):
     assert [(r["key_type"], r["key_value"]) for r in read_rows(out, "xrefs")] == [
         ("UNII", "ABCDEFGHIJ")
     ]
+
+
+UMLS = {"format": "umls", **NATIVE, "mrconso": "m.rrf", "sources": ["NCI"]}
+SPLIT_CODE = (
+    "C1|ENG|P|L|PF|S1|Y|A1||||NCI|PT|C9|Drug A||N||\n"
+    "C2|ENG|P|L|PF|S2|Y|A2||||NCI|SY|C9|Drug A gene||N||\n"
+)
+SEMANTIC_TYPES = "C1|T121|A|Pharmacologic Substance|AT1||\nC2|T028|A|Gene|AT2||\n"
+
+
+def test_umls_spills_under_run_scratch(run_source, monkeypatch, tmp_path):
+    import mprint_workflow.umls as umls
+
+    seen = []
+    original = umls.TemporaryDirectory
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("dir"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(umls, "TemporaryDirectory", spy)
+    run_source(UMLS, {"m.rrf": SPLIT_CODE})
+    assert seen[0] is not None and Path(seen[0]).is_relative_to(tmp_path)
+
+
+def test_code_split_outside_semantic_filter_is_not_one_to_one(run_source, read_rows):
+    out = run_source(
+        {**UMLS, "mrsty": "s.rrf", "semantic_types": ["T121"]},
+        {"m.rrf": SPLIT_CODE, "s.rrf": SEMANTIC_TYPES},
+    )
+    assert [r["concept_code"] for r in read_rows(out, "concepts")] == ["C1"]
+    assert [r["key_type"] for r in read_rows(out, "xrefs")] == ["UMLS_CUI"]
+
+
+def test_code_split_outside_tty_filter_is_not_one_to_one(run_source, read_rows):
+    out = run_source({**UMLS, "ttys": ["PT"]}, {"m.rrf": SPLIT_CODE})
+    assert [r["concept_code"] for r in read_rows(out, "concepts")] == ["C1"]
+    assert [r["key_type"] for r in read_rows(out, "xrefs")] == ["UMLS_CUI"]
