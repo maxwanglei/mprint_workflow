@@ -20,7 +20,7 @@ test = ["pytest>=8,<10"]
 mprint-prepare = "mprint_workflow.prepare_dictionaries:main"
 
 [tool.hatch.build.targets.sdist]
-include = ["/*.py", "/pyproject.toml", "/README.md", "/FORMATS.md", "/LICENSE", "/NOTICE", "/sources.example.yaml", "/demo"]
+include = ["/*.py", "/pyproject.toml", "/README.md", "/FORMATS.md", "/LICENSE", "/NOTICE", "/sources.example.yaml", "/demo", "/colab", "/docs/colab-google-drive.md"]
 exclude = ["**/__pycache__"]
 
 [tool.hatch.build.targets.wheel]

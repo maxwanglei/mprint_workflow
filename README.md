@@ -94,3 +94,7 @@ print(counts["concepts"])  # 2
 ```
 
 The reference lists the release files to obtain for each dictionary, accepted filters, exact table schemas, and code and provenance conventions. [Input and output formats](FORMATS.md)
+
+## Run on Google Colab
+
+To build on a Google Colab VM with your releases and results in Google Drive, follow [Run the dictionary build on Google Colab with Google Drive](docs/colab-google-drive.md).
