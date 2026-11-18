@@ -25,7 +25,7 @@ exclude = ["**/__pycache__"]
 
 [tool.hatch.build.targets.wheel]
 include = ["/*.py", "/demo", "/sources.example.yaml", "/FORMATS.md"]
-exclude = ["/test_*.py", "**/__pycache__"]
+exclude = ["/test_*.py", "/conftest.py", "**/__pycache__"]
 sources = {"" = "mprint_workflow"}
 
 [tool.pytest.ini_options]

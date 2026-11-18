@@ -30,6 +30,7 @@ from .schema import (
     DUCKDB_CONFIG,
     OUTPUTS,
     TABLES,
+    _text,
     load_declaration,
     validate_aliases,
     validate_declaration,
@@ -61,6 +62,31 @@ OPTIONS = {
     "orange_book": {"path", "encoding"},
     "article57": {"path", "encoding", "sheet", "code_column"},
 }
+REQUIRED = {
+    "athena": frozenset({"path"}),
+    "tables": frozenset({"path"}),
+    "umls": frozenset({"mrconso"}),
+    "mesh": frozenset(),
+    **dict.fromkeys(
+        ("ncit", "drugbank", "gsrs", "drugsfda", "orange_book", "article57"), frozenset({"path"})
+    ),
+}
+NATIVE_OPTIONS = frozenset({"vocabulary_id", "license", "release"})
+NATIVE_REQUIRED = frozenset({"vocabulary_id", "release"})
+TEXT_OPTIONS = frozenset(
+    {
+        "path",
+        "mrconso",
+        "mrsty",
+        "descriptors",
+        "supplemental",
+        "encoding",
+        "sheet",
+        "code_column",
+        "vocabulary_id",
+        "license",
+    }
+)
 INPUT_ERRORS = (
     ValueError,
     OSError,
@@ -203,6 +229,29 @@ def check_keys(directory, declaration, scratch):
                 raise ValueError(f"{table}: missing concept {missing}")
 
 
+def validate_source(settings):
+    """Check one source mapping's shape and option types; return its format."""
+    if not isinstance(settings, dict):
+        raise ValueError("expected a source mapping")
+    if "format" not in settings:
+        raise ValueError("missing required option 'format'")
+    kind = settings["format"]
+    if not isinstance(kind, str) or kind not in OPTIONS:
+        raise ValueError(f"unknown format {kind!r}; choose from {sorted(OPTIONS)}")
+    native = kind in READERS
+    allowed = OPTIONS[kind] | {"format"} | (NATIVE_OPTIONS if native else frozenset())
+    required = REQUIRED[kind] | (NATIVE_REQUIRED if native else frozenset())
+    unknown = settings.keys() - allowed
+    if unknown:
+        raise ValueError(f"unknown options for {kind}: {sorted(unknown)}")
+    missing = sorted(required - settings.keys())
+    if missing:
+        raise ValueError(f"missing required option {missing[0]!r}")
+    for option in sorted(TEXT_OPTIONS & settings.keys()):
+        _text(settings[option], option)
+    return kind
+
+
 def prepare(config_path, output, only, compile_bundle):
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if (
@@ -230,17 +279,7 @@ def prepare(config_path, output, only, compile_bundle):
                 if only and name not in only:
                     continue
                 try:
-                    if not isinstance(settings, dict):
-                        raise ValueError("expected a source mapping")
-                    kind = settings["format"]
-                    if not isinstance(kind, str) or kind not in OPTIONS:
-                        raise ValueError(f"unknown format {kind!r}; choose from {sorted(OPTIONS)}")
-                    allowed = set(OPTIONS[kind]) | {"format"}
-                    if kind in READERS:
-                        allowed.update({"vocabulary_id", "license", "release"})
-                    unknown_options = settings.keys() - allowed
-                    if unknown_options:
-                        raise ValueError(f"unknown options for {kind}: {sorted(unknown_options)}")
+                    kind = validate_source(settings)
                     before = sink.counts["concepts"]
                     if kind in ("athena", "tables"):
                         directory = sink.path(settings["path"])
@@ -251,6 +290,9 @@ def prepare(config_path, output, only, compile_bundle):
                         declaration = load_declaration(directory / "vocabularies.yaml")
                         vocabularies.extend(declaration["vocabularies"])
                         merge_aliases(aliases, declaration["source_aliases"])
+                        validate_declaration(
+                            {"vocabularies": vocabularies, "source_aliases": aliases}
+                        )
                         copy_tables(directory, sink)
                     else:
                         release = settings["release"]
@@ -263,13 +305,14 @@ def prepare(config_path, output, only, compile_bundle):
                                 "license": settings.get("license", "unspecified"),
                             }
                         )
+                        validate_declaration(
+                            {"vocabularies": vocabularies, "source_aliases": aliases}
+                        )
                         READERS[kind](settings, sink)
                     added = sink.counts["concepts"] - before
                     if not added:
                         raise ValueError("no concepts matched the input and filters")
                     print(f"{name}: {added:,} concepts", file=sys.stderr)
-                except KeyError as exc:
-                    raise ValueError(f"source {name!r}: missing config key {exc}") from exc
                 except INPUT_ERRORS as exc:
                     raise ValueError(f"source {name!r}: {exc}") from exc
         declaration = validate_declaration(

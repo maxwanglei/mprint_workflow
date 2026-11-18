@@ -76,7 +76,7 @@ Set `path` to the extracted `Thesaurus.txt` from the NCI FLAT release. The heade
 code   concept IRI   parents   synonyms   definition   display name   concept status   semantic type   [concept in subset]
 ```
 
-Use tab separators and keep empty fields in position. The ninth field is optional. Entries within a multivalued field use `|`. The first nonempty synonym is the preferred name, and later distinct names are aliases. Optional `semantic_types` is a list of native semantic type names. The reader retains a row if any match. Retired/obsolete source statuses become `obsolete`. [NCI FLAT release layout](https://evs.nci.nih.gov/ftp1/NCI_Thesaurus/ReadMe.txt)
+Use tab separators and keep empty fields in position. The ninth field is optional. Entries within a multivalued field use `|`. The first nonempty synonym is the preferred name, and later distinct names are aliases. Optional `semantic_types` is a nonempty list of native semantic type names. The reader retains a row if any match. Retired/obsolete source statuses become `obsolete`. [NCI FLAT release layout](https://evs.nci.nih.gov/ftp1/NCI_Thesaurus/ReadMe.txt)
 
 ### `drugbank` — DrugBank full database
 
