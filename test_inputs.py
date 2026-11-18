@@ -4,6 +4,7 @@ import gzip
 import io
 import zipfile
 
+import duckdb
 import pytest
 
 NATIVE = {"vocabulary_id": "V", "release": "r"}
@@ -79,3 +80,34 @@ def test_unselected_ncit_row_over_128k(run_source, read_rows):
         {"t.txt": NCIT_ROW + gene},
     )
     assert [r["concept_code"] for r in read_rows(out, "concepts")] == ["C1"]
+
+
+TABLES = {"format": "tables", "path": "t"}
+DECLARATION = "vocabularies: [{vocabulary_id: V, release: r}]\n"
+
+
+def test_ragged_tables_row(run_source):
+    files = {
+        "t/vocabularies.yaml": DECLARATION,
+        "t/concepts.csv": "vocabulary_id,concept_code,concept_name\nV,1,a,EXTRA\n",
+    }
+    with pytest.raises(ValueError, match=r"concepts\.csv:2: more fields than the header"):
+        run_source(TABLES, files)
+
+
+def test_duplicate_tables_header(run_source):
+    files = {
+        "t/vocabularies.yaml": DECLARATION,
+        "t/concepts.csv": "vocabulary_id,concept_code,concept_name,concept_name\nV,1,a,b\n",
+    }
+    with pytest.raises(ValueError, match="duplicate column"):
+        run_source(TABLES, files)
+
+
+def test_parquet_identifiers_must_be_text(run_source, tmp_path):
+    (tmp_path / "t").mkdir()
+    duckdb.sql(
+        "SELECT 'V' AS vocabulary_id, 7::INTEGER AS concept_code, 'a' AS concept_name"
+    ).write_parquet(str(tmp_path / "t" / "concepts.parquet"))
+    with pytest.raises(ValueError, match=r"non-text column\(s\) \['concept_code'\]"):
+        run_source(TABLES, {"t/vocabularies.yaml": DECLARATION})

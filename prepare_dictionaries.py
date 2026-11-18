@@ -142,6 +142,13 @@ def _parquet_rows(result, columns):
             yield dict(zip(columns, values, strict=True))
 
 
+def _csv_rows(reader, path):
+    for row in reader:
+        if None in row:
+            raise ValueError(f"{path}:{reader.line_num}: more fields than the header")
+        yield row
+
+
 def copy_tables(directory, sink):
     """Append a prepared dictionary directory, including optional per-product evidence."""
     for name, spec in OUTPUTS.items():
@@ -157,12 +164,19 @@ def copy_tables(directory, sink):
                 db = stack.enter_context(duckdb.connect(config=DUCKDB_CONFIG))
                 result = db.read_parquet(str(path)).execute()
                 columns = result.columns
+                untyped = [c for c, t in zip(columns, result.types, strict=True) if t != "VARCHAR"]
+                if untyped:
+                    raise ValueError(
+                        f"{path}: non-text column(s) {untyped}; store values as strings"
+                    )
                 rows = _parquet_rows(result, columns)
             else:
                 file = stack.enter_context(path.open(encoding="utf-8-sig", newline=""))
                 reader = csv.DictReader(file, delimiter="\t" if path.suffix == ".tsv" else ",")
                 columns = reader.fieldnames or []
-                rows = reader
+                rows = _csv_rows(reader, path)
+            if len(set(columns)) != len(columns):
+                raise ValueError(f"{path}: duplicate column in header {columns}")
             if set(spec.required) - set(columns) or set(columns) - set(spec.columns):
                 raise ValueError(f"{path}: columns do not match the {name} contract: {columns}")
             for row in rows:
