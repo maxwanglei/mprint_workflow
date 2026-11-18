@@ -90,4 +90,6 @@ def build_bundle(tables: Path, output: Path, declaration: dict) -> None:
             json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        if output.exists():
+            output.rmdir()  # Windows cannot rename onto an existing directory.
         staging.rename(output)

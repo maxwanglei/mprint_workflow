@@ -296,6 +296,8 @@ def prepare(config_path, output, only, compile_bundle):
         raise ValueError(f"unknown source name(s): {sorted(unknown)}; choices: {list(sources)}")
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise ValueError(f"output {output} already contains data; choose a fresh directory")
+    if Path.cwd().is_relative_to(output.resolve()):
+        raise ValueError(f"output {output} holds the current directory; choose a subdirectory")
     output.parent.mkdir(parents=True, exist_ok=True)
     vocabularies = []
     aliases = validate_aliases(config.get("source_aliases", {}))
@@ -357,6 +359,8 @@ def prepare(config_path, output, only, compile_bundle):
         )
         if compile_bundle:
             build_bundle(staging, staging / "bundle", declaration)
+        if output.exists():
+            output.rmdir()  # Windows cannot rename onto an existing directory.
         staging.rename(output)
     return counts
 

@@ -72,7 +72,7 @@ These two hits trace to one naming authority. The UMLS source atom uses the NCI 
 
 1. Copy `sources.example.yaml` next to your release directory. Edit the paths and filters for the sources you have. An absolute input path works anywhere. A relative input path starts at the directory containing the YAML file. `--output` is relative to the shell's working directory unless you pass an absolute path.
 2. Give each native source its actual `release` identifier or snapshot date and its `vocabulary_id`. Quote dates and numeric-looking identifiers. Record its license in `license` for downstream users. Athena reads release versions from `VOCABULARY.csv`. Prepared tables carry their own `vocabularies.yaml`.
-3. Choose a fresh output directory. `--only` takes one or more **source names**, which are the keys directly under `sources` in YAML. For example, with the template copied to `data/sources.yaml` and the selected files installed under `data/raw/`, run the following.
+3. Choose a fresh output directory. It may exist if it is empty, but it cannot be the current working directory or one of its parents. `--only` takes one or more **source names**, which are the keys directly under `sources` in YAML. For example, with the template copied to `data/sources.yaml` and the selected files installed under `data/raw/`, run the following.
 
 ```bash
 mprint-prepare --config data/sources.yaml --only athena gsrs \

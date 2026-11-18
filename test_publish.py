@@ -2,9 +2,14 @@
 
 import csv
 import io
+from pathlib import Path
 
 import duckdb
 import pytest
+import yaml
+
+from mprint_workflow.bundle import build_bundle
+from mprint_workflow.prepare_dictionaries import prepare
 
 NATIVE = {"vocabulary_id": "V", "release": "r"}
 TABLES = {"format": "tables", "path": "t"}
@@ -117,3 +122,39 @@ def test_vocabularies_yaml_keeps_unicode(run_source):
         {"t.txt": "C1\tiri\t\tDrug A\t\t\t\tPharmacologic Substance\n"},
     )
     assert "für" in (out / "vocabularies.yaml").read_text(encoding="utf-8")
+
+
+DEMO = Path(__file__).parent / "demo" / "sources.yaml"
+
+
+@pytest.fixture
+def windows_rename(monkeypatch):
+    original = Path.rename
+
+    def rename(self, target):
+        if Path(target).exists():
+            raise FileExistsError(target)
+        return original(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+
+
+def test_existing_empty_output_publishes_on_windows(windows_rename, tmp_path):
+    (tmp_path / "out").mkdir()
+    prepare(DEMO, tmp_path / "out", [], True)
+    assert (tmp_path / "out" / "bundle" / "manifest.json").is_file()
+
+
+def test_bundle_into_existing_empty_directory_on_windows(windows_rename, tmp_path):
+    prepared = tmp_path / "prepared"
+    prepare(DEMO, prepared, [], False)
+    (tmp_path / "bundle").mkdir()
+    declaration = yaml.safe_load((prepared / "vocabularies.yaml").read_text(encoding="utf-8"))
+    build_bundle(prepared, tmp_path / "bundle", declaration)
+    assert (tmp_path / "bundle" / "manifest.json").is_file()
+
+
+def test_output_cannot_be_the_working_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="current directory"):
+        prepare(DEMO, Path.cwd(), [], False)
