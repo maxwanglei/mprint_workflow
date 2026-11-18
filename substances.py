@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import sys
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -22,7 +23,10 @@ def _release_file(path: Path, pattern: str) -> Iterator[IO[bytes]]:
             members = [
                 item
                 for item in archive.infolist()
-                if not item.is_dir() and fnmatch(Path(item.filename).name.lower(), pattern)
+                if not item.is_dir()
+                and "__MACOSX" not in Path(item.filename).parts
+                and not Path(item.filename).name.startswith("._")
+                and fnmatch(Path(item.filename).name.lower(), pattern)
             ]
             if len(members) != 1:
                 raise ValueError(f"{path}: expected one {pattern} member, found {len(members)}")
@@ -81,7 +85,8 @@ def read_gsrs(config: Mapping[str, Any], sink: Any) -> None:
         raise ValueError(f"{path}: FDA UNII Names file contains no substances")
 
 
-def _drugbank_record(drug: ET.Element, vocabulary: str, sink: Any) -> None:
+def _drugbank_record(drug: ET.Element, vocabulary: str, sink: Any) -> bool:
+    """Add one drug; return True when its direct UNII was malformed and dropped."""
     primary = [
         (node.text or "").strip()
         for node in drug.findall("{*}drugbank-id")
@@ -113,23 +118,25 @@ def _drugbank_record(drug: ET.Element, vocabulary: str, sink: Any) -> None:
             )
     # Nested salts and products have independent identities, including their own UNIIs.
     unii = drug.findtext("{*}unii", default="").strip()
-    if unii:
-        if not re.fullmatch(r"[A-Z0-9]{10}", unii):
-            raise ValueError(f"DrugBank drug {code} has an invalid UNII")
-        sink.add(
-            "xrefs",
-            vocabulary_id=vocabulary,
-            concept_code=code,
-            key_type="UNII",
-            key_value=unii,
-            assertion_source=vocabulary,
-        )
+    if not unii:
+        return False
+    if not re.fullmatch(r"[A-Z0-9]{10}", unii):
+        return True
+    sink.add(
+        "xrefs",
+        vocabulary_id=vocabulary,
+        concept_code=code,
+        key_type="UNII",
+        key_value=unii,
+        assertion_source=vocabulary,
+    )
+    return False
 
 
 def read_drugbank(config: Mapping[str, Any], sink: Any) -> None:
     """Stream top-level drug records from the DrugBank full XML database."""
     path = sink.path(config["path"])
-    count = 0
+    count = skipped = 0
     with _release_file(path, "*.xml") as stream:
         events = ET.iterparse(stream, events=("start", "end"))
         _, root = next(events)
@@ -142,9 +149,11 @@ def read_drugbank(config: Mapping[str, Any], sink: Any) -> None:
                 continue
             if depth == 2:
                 if node.tag.rsplit("}", 1)[-1] == "drug":
-                    _drugbank_record(node, config["vocabulary_id"], sink)
+                    skipped += _drugbank_record(node, config["vocabulary_id"], sink)
                     count += 1
                 root.remove(node)
             depth -= 1
     if count == 0:
         raise ValueError(f"{path}: DrugBank XML contains no drug records")
+    if skipped:
+        print(f"{path}: skipped {skipped} invalid UNII value(s)", file=sys.stderr)

@@ -1,6 +1,7 @@
 """Native release readers handle the shapes real and exported releases take."""
 
 import io
+import zipfile
 
 import pytest
 
@@ -49,3 +50,51 @@ def test_xlsx_with_title_rows(run_source, read_rows):
     workbook.save(buffer)
     out = run_source({**A57, "path": "a.xlsx"}, {"a.xlsx": buffer.getvalue()})
     assert [r["concept_name"] for r in read_rows(out, "concepts")] == ["Drug A"]
+
+
+DRUG = (
+    '<drug type="small molecule"><drugbank-id primary="true">DB{n:05d}</drugbank-id>'
+    "<name>D{n}</name><unii>{unii}</unii></drug>"
+)
+
+
+def drugbank_xml(*uniis):
+    body = "".join(DRUG.format(n=i, unii=u) for i, u in enumerate(uniis, 1))
+    return f'<drugbank xmlns="http://www.drugbank.ca">{body}</drugbank>'
+
+
+def zip_bytes(members):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in members.items():
+            archive.writestr(name, content)
+    return buffer.getvalue()
+
+
+def test_drugbank_zip_ignores_macos_metadata(run_source, read_rows):
+    data = zip_bytes(
+        {
+            "full database.xml": drugbank_xml("ABCDEFGHIJ"),
+            "__MACOSX/._full database.xml": b"\x00\x05\x16\x07",
+        }
+    )
+    out = run_source({"format": "drugbank", **NATIVE, "path": "db.zip"}, {"db.zip": data})
+    assert [r["concept_code"] for r in read_rows(out, "concepts")] == ["DB00001"]
+
+
+def test_invalid_unii_drops_only_that_link(run_source, read_rows, capsys):
+    out = run_source(
+        {"format": "drugbank", **NATIVE, "path": "db.xml"},
+        {"db.xml": drugbank_xml("ABCDEFGHIJ", "abcdefghij")},
+    )
+    assert len(read_rows(out, "concepts")) == 2
+    assert [r["key_value"] for r in read_rows(out, "xrefs")] == ["ABCDEFGHIJ"]
+    assert "skipped 1 invalid UNII" in capsys.readouterr().err
+
+
+def test_gsrs_zip_with_readme_member(run_source, read_rows):
+    names = "NAME\tTYPE\tUNII\tDISPLAY_NAME\n" + "Aspirin\tcn\tR16CO5Y76E\tASPIRIN\n" * 2
+    data = zip_bytes({"UNII_Names_4Aug2026.txt": names, "READ ME UNII Lists.txt": "readme"})
+    out = run_source({"format": "gsrs", **NATIVE, "path": "UNIIs.zip"}, {"UNIIs.zip": data})
+    assert [r["concept_code"] for r in read_rows(out, "concepts")] == ["R16CO5Y76E"]
+    assert [r["synonym"] for r in read_rows(out, "synonyms")] == ["Aspirin"]

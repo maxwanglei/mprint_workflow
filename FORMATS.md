@@ -80,7 +80,7 @@ Use tab separators and keep empty fields in position. The ninth field is optiona
 
 ### `drugbank` — DrugBank full database
 
-Set `path` to the full XML database or a ZIP with a single `.xml` member. The root is `drugbank`. Every direct `drug` child must have exactly one direct `drugbank-id` marked `primary="true"` or `primary="1"` and a `name`. Optional `drug/@type` sets the class. `synonyms/synonym` with absent/empty language or `language="English"`/`"en"` supplies aliases, case-insensitively. A direct `unii` element, if present and nonempty, must hold ten uppercase letters/digits. Nested product names, salts and their UNIIs refer to separate records. [DrugBank releases](https://go.drugbank.com/releases)
+Set `path` to the full XML database or a ZIP with a single `.xml` member. The root is `drugbank`. Every direct `drug` child must have exactly one direct `drugbank-id` marked `primary="true"` or `primary="1"` and a `name`. Optional `drug/@type` sets the class. `synonyms/synonym` with absent/empty language or `language="English"`/`"en"` supplies aliases, case-insensitively. A direct `unii` element supplies a UNII key when it holds ten uppercase letters/digits. Other nonempty values are dropped and counted on stderr. Archive members under `__MACOSX/` or named `._*` are ignored. Nested product names, salts and their UNIIs refer to separate records. [DrugBank releases](https://go.drugbank.com/releases)
 
 ### `drugsfda` and `orange_book` — FDA drug products
 
