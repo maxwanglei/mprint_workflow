@@ -58,6 +58,7 @@ def test_corrupt_gsrs_deflate(run_source):
 
 
 def test_xlsx_that_is_not_a_workbook(run_source):
+    pytest.importorskip("openpyxl")
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("hello.txt", "not a workbook")
