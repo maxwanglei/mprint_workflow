@@ -88,10 +88,10 @@ Set `path` to the extracted product file. Both formats expect the native header 
 
 | Format | File and delimiter | Required columns | Optional evidence columns consumed |
 | --- | --- | --- | --- |
-| `drugsfda` | Drugs@FDA `Products.txt`, tab | `ApplNo`, `ProductNo`, `DrugName` | `ActiveIngredient`, `Strength`, `Form`. If supplied, `Appl_Type`, `Applicant_Full_Name` or `Applicant` also carry through. |
+| `drugsfda` | Drugs@FDA `Products.txt`, tab | `ApplNo`, `ProductNo`, `DrugName` | `ActiveIngredient`, `Strength`, `Form`. Set optional `applications` to the release's `Applications.txt` to add `ApplType` and `SponsorName`. |
 | `orange_book` | Orange Book `products.txt`, tilde (`~`) | `Appl_No`, `Product_No`, `Trade_Name` | `Appl_Type`, `Ingredient`, `Strength`, `DF;Route`, `Applicant_Full_Name` or `Applicant` |
 
-Both readers use the native digit strings for application and product number and join them with a hyphen, for example `000123-002`. Each distinct application/product pair supplies a concept and a shared FDA cross-reference. Repeated keys may supply additional names and evidence. Blank or `NULL` product names are skipped. Drugs@FDA `Form` is preserved verbatim. Orange Book `DF;Route` splits into form and route when it contains one semicolon. The ingredient text is retained on the product evidence row. [Drugs@FDA data files](https://www.fda.gov/drugs/drug-approvals-and-databases/drugsfda-data-files) · [Orange Book data files](https://www.fda.gov/drugs/drug-approvals-and-databases/orange-book-data-files)
+Both readers use the native digit strings for application and product number and join them with a hyphen, for example `000123-002`. Each distinct application/product pair supplies a concept and a shared FDA cross-reference. Repeated keys may supply additional names and evidence. Blank or `NULL` product names are skipped. Drugs@FDA `Form` and Orange Book `DF;Route` split into form and route when they contain exactly one semicolon, and stay whole otherwise. The ingredient text is retained on the product evidence row. [Drugs@FDA data files](https://www.fda.gov/drugs/drug-approvals-and-databases/drugsfda-data-files) · [Orange Book data files](https://www.fda.gov/drugs/drug-approvals-and-databases/orange-book-data-files)
 
 ### `article57` — EMA Article 57 public product list
 
@@ -175,12 +175,12 @@ A row records product facts as stated together in a source row. Multiple rows ma
 | --- | --- |
 | `vocabulary_id`, `concept_code` **required** | Foreign key to the FDA, EMA or imported product concept. |
 | `product_name` **required** | Drug or trade name on the source row. |
-| `application_type` | Reported FDA application type, for example the Orange Book value `N` or `A`. |
+| `application_type` | Reported FDA application type, for example the Orange Book value `N` or `A`, or Drugs@FDA `NDA` when `applications` is set. |
 | `application_number` | FDA application number, including any leading zeroes. One application can cover multiple products. |
 | `product_number` | FDA product number within the application. Different strengths may have different numbers. |
 | `ingredient_text` | Active ingredient or substance wording as reported. It may contain several ingredients. |
 | `strength` | Reported strength value and units as supplied. |
-| `dose_form` | Source dosage/pharmaceutical form text. Drugs@FDA may combine form and route here. |
+| `dose_form` | Source dosage/pharmaceutical form text. An FDA value without exactly one `;` is kept whole here. |
 | `route` | Reported route when available as a distinct field. |
 | `country` | EMA product authorisation country as published. |
 | `holder` | Applicant or marketing authorisation holder. |

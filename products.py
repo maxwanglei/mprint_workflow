@@ -20,9 +20,28 @@ from typing import Any
 from urllib.parse import quote
 
 
+def _application_facts(path: Path, encoding: str) -> dict[str, tuple[str, str]]:
+    """Map each Drugs@FDA ApplNo to its (ApplType, SponsorName) in Applications.txt."""
+    with path.open(encoding=encoding, newline="") as stream:
+        reader = csv.DictReader(stream, delimiter="\t", quoting=csv.QUOTE_NONE)
+        missing = {"ApplNo", "ApplType", "SponsorName"} - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"{path}: missing Drugs@FDA application column(s) {sorted(missing)}")
+        return {
+            (row["ApplNo"] or "").strip(): (row["ApplType"] or "", row["SponsorName"] or "")
+            for row in reader
+        }
+
+
 def _fda_products(config: Mapping[str, Any], sink: Any, *, orange_book: bool) -> None:
     path = sink.path(config["path"])
     vocabulary = config["vocabulary_id"]
+    encoding = config.get("encoding", "utf-8-sig")
+    applications = (
+        _application_facts(sink.path(config["applications"]), encoding)
+        if "applications" in config
+        else {}
+    )
     if orange_book:
         columns = ("Appl_No", "Product_No", "Trade_Name")
         delimiter = "~"
@@ -33,7 +52,7 @@ def _fda_products(config: Mapping[str, Any], sink: Any, *, orange_book: bool) ->
     # Multipart/therapeutic-equivalence records can repeat the product
     # key. Preserve distinct source-asserted names while emitting one concept.
     names_by_code: dict[str, set[str]] = {}
-    with path.open(encoding=config.get("encoding", "utf-8-sig"), newline="") as stream:
+    with path.open(encoding=encoding, newline="") as stream:
         reader = csv.DictReader(stream, delimiter=delimiter, quoting=csv.QUOTE_NONE)
         missing = set(columns) - set(reader.fieldnames or [])
         if missing:
@@ -52,25 +71,30 @@ def _fda_products(config: Mapping[str, Any], sink: Any, *, orange_book: bool) ->
             ):
                 raise ValueError(f"{path}:{reader.line_num}: invalid FDA application/product key")
             code = f"{application}-{product}"
-            # FDA defines the Orange Book field as dosage form;route. Keep
-            # the Drugs@FDA Form field intact, including multipart entries.
+            # Both releases write dosage form;route. Multipart entries carry
+            # more semicolons and stay whole.
             form = row.get("DF;Route" if orange_book else "Form", "")
             route = ""
-            if orange_book and form.count(";") == 1:
+            if form.count(";") == 1:
                 form, route = form.split(";")
+            if orange_book:
+                application_type = row.get("Appl_Type", "")
+                holder = row.get("Applicant_Full_Name") or row.get("Applicant", "")
+            else:
+                application_type, holder = applications.get(application, ("", ""))
             sink.add(
                 "product_evidence",
                 vocabulary_id=vocabulary,
                 concept_code=code,
                 product_name=name,
-                application_type=row.get("Appl_Type", ""),
+                application_type=application_type,
                 application_number=application,
                 product_number=product,
                 ingredient_text=row.get("Ingredient" if orange_book else "ActiveIngredient", ""),
                 strength=row.get("Strength", ""),
                 dose_form=form,
                 route=route,
-                holder=row.get("Applicant_Full_Name") or row.get("Applicant", ""),
+                holder=holder,
             )
             names = names_by_code.setdefault(code, set())
             if name in names:

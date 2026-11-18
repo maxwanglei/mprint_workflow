@@ -61,7 +61,7 @@ OPTIONS = {
     "ncit": {"path", "semantic_types"},
     "drugbank": {"path"},
     "gsrs": {"path"},
-    "drugsfda": {"path", "encoding"},
+    "drugsfda": {"path", "encoding", "applications"},
     "orange_book": {"path", "encoding"},
     "article57": {"path", "encoding", "sheet", "code_column"},
 }
@@ -88,6 +88,7 @@ TEXT_OPTIONS = frozenset(
         "code_column",
         "vocabulary_id",
         "license",
+        "applications",
     }
 )
 INPUT_ERRORS = (

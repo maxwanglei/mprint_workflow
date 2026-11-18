@@ -185,3 +185,39 @@ def test_code_split_outside_tty_filter_is_not_one_to_one(run_source, read_rows):
     out = run_source({**UMLS, "ttys": ["PT"]}, {"m.rrf": SPLIT_CODE})
     assert [r["concept_code"] for r in read_rows(out, "concepts")] == ["C1"]
     assert [r["key_type"] for r in read_rows(out, "xrefs")] == ["UMLS_CUI"]
+
+
+DRUGSFDA = {"format": "drugsfda", **NATIVE, "path": "Products.txt"}
+PRODUCTS = (
+    "ApplNo\tProductNo\tForm\tStrength\tReferenceDrug\tDrugName\tActiveIngredient\tReferenceStandard\n"
+    "000123\t001\tTABLET;ORAL\t5MG\t0\tEXAMPLE\tEXAMPLE DRUG\t0\n"
+    "000456\t001\tKIT\tN/A\t0\tEXAMPLE KIT\tEXAMPLE DRUG\t0\n"
+)
+APPLICATIONS = (
+    "ApplNo\tApplType\tApplPublicNotes\tSponsorName\n"
+    "000123\tNDA\t\tEXAMPLE PHARMA\n000456\tANDA\t\tOTHER PHARMA\n"
+)
+
+
+def test_drugsfda_joins_applications(run_source, read_rows):
+    out = run_source(
+        {**DRUGSFDA, "applications": "Applications.txt"},
+        {"Products.txt": PRODUCTS, "Applications.txt": APPLICATIONS},
+    )
+    facts = {
+        r["application_number"]: (r["application_type"], r["holder"])
+        for r in read_rows(out, "product_evidence")
+    }
+    assert facts == {"000123": ("NDA", "EXAMPLE PHARMA"), "000456": ("ANDA", "OTHER PHARMA")}
+
+
+def test_drugsfda_splits_a_single_semicolon_form(run_source, read_rows):
+    out = run_source(DRUGSFDA, {"Products.txt": PRODUCTS})
+    forms = {(r["dose_form"], r["route"]) for r in read_rows(out, "product_evidence")}
+    assert forms == {("TABLET", "ORAL"), ("KIT", "")}
+
+
+def test_drugsfda_reads_cp1252(run_source, read_rows):
+    text = PRODUCTS.replace("\tEXAMPLE\t", "\tEXAMPLE®\t")
+    out = run_source({**DRUGSFDA, "encoding": "cp1252"}, {"Products.txt": text.encode("cp1252")})
+    assert "EXAMPLE®" in {r["concept_name"] for r in read_rows(out, "concepts")}

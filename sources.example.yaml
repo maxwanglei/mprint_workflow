@@ -53,6 +53,7 @@ sources:
     vocabulary_id: Drugs@FDA
     release: REPLACE_WITH_RELEASE
     path: raw/drugsfda/Products.txt
+    applications: raw/drugsfda/Applications.txt
   orange_book:
     format: orange_book
     vocabulary_id: OrangeBook
