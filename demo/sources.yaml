@@ -1,0 +1,17 @@
+# Tiny invented records for testing the local preparation command.
+source_aliases: {NCI: NCIt}
+sources:
+  ncit:
+    format: ncit
+    vocabulary_id: NCIt
+    release: synthetic-v1
+    license: synthetic
+    path: Thesaurus.txt
+  umls:
+    format: umls
+    vocabulary_id: UMLS
+    release: synthetic-v1
+    license: synthetic
+    mrconso: MRCONSO.RRF
+    sources: [NCI]
+    ttys: [PT, SY]

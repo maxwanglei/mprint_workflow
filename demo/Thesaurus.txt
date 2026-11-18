@@ -1,0 +1,2 @@
+C99900001	http://example.invalid/C99900001		Example compound|Example drug			Active	Pharmacologic Substance	
+C99900002	http://example.invalid/C99900002		Example salt|Example compound salt			Active	Pharmacologic Substance	

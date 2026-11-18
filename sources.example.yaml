@@ -1,0 +1,65 @@
+# Paths are relative to this file. Copy this template next to a raw/ directory.
+# Replace the release placeholders for the sources you select.
+source_aliases:
+  RXNORM: RxNorm
+  MSH: MeSH
+  NCI: NCIt
+  SNOMEDCT_US: SNOMED
+  DRUGBANK: DrugBank
+sources:
+  athena:
+    format: athena
+    path: raw/athena
+    vocabularies: [RxNorm, RxNorm Extension, SNOMED, ATC]
+    domains:
+      SNOMED: [Drug]
+    # Versions are read from VOCABULARY.csv.
+  umls:
+    format: umls
+    vocabulary_id: UMLS
+    release: REPLACE_WITH_RELEASE
+    mrconso: raw/umls/META/MRCONSO.RRF
+    sources: [RXNORM, MSH, NCI, SNOMEDCT_US, DRUGBANK]
+    language: ENG
+    ttys: [IN, PIN, MIN, BN, SCD, SBD, MH, NM, PT, SY]
+    mrsty: raw/umls/META/MRSTY.RRF
+    semantic_types: [T121, T195, T200]  # Example drug-focused starting subset.
+  mesh:
+    format: mesh
+    vocabulary_id: MeSH
+    release: REPLACE_WITH_RELEASE
+    descriptors: raw/mesh/desc.xml
+    supplemental: raw/mesh/supp.xml
+    descriptor_tree_prefixes: [D]  # Chemicals and drugs.
+    scr_classes: [1]               # Chemical supplementary concept records.
+  gsrs:
+    format: gsrs
+    vocabulary_id: UNII
+    release: REPLACE_WITH_RELEASE
+    path: raw/gsrs/UNIIs.zip
+  ncit:
+    format: ncit
+    vocabulary_id: NCIt
+    release: REPLACE_WITH_RELEASE
+    path: raw/ncit/Thesaurus.txt
+    semantic_types: [Pharmacologic Substance, Clinical Drug]
+  drugbank:
+    format: drugbank
+    vocabulary_id: DrugBank
+    release: REPLACE_WITH_RELEASE
+    path: raw/drugbank/full database.xml
+  drugsfda:
+    format: drugsfda
+    vocabulary_id: Drugs@FDA
+    release: REPLACE_WITH_RELEASE
+    path: raw/drugsfda/Products.txt
+  orange_book:
+    format: orange_book
+    vocabulary_id: OrangeBook
+    release: REPLACE_WITH_RELEASE
+    path: raw/orangebook/products.txt
+  article57:
+    format: article57
+    vocabulary_id: EMAArticle57
+    release: REPLACE_WITH_RELEASE
+    path: raw/ema/article57.xlsx
