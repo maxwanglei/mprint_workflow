@@ -122,7 +122,10 @@ def _article_rows(path: Path, config: Mapping[str, Any]) -> Iterator[Sequence[An
             raise ValueError(
                 "Article 57 XLSX needs openpyxl; install openpyxl or export to CSV"
             ) from exc
-        workbook = load_workbook(path, read_only=True, data_only=True)
+        try:
+            workbook = load_workbook(path, read_only=True, data_only=True)
+        except KeyError as exc:
+            raise ValueError(f"{path}: not an Excel workbook ({exc})") from exc
         try:
             sheet = config.get("sheet", "Art57 product data")
             if sheet not in workbook.sheetnames:

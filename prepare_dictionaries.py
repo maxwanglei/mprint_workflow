@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sqlite3
 import sys
+import zlib
 from collections import Counter
 from contextlib import ExitStack
 from pathlib import Path
@@ -94,6 +96,9 @@ INPUT_ERRORS = (
     ParseError,
     BadZipFile,
     duckdb.Error,
+    EOFError,
+    zlib.error,
+    sqlite3.Error,
 )
 
 
@@ -253,6 +258,7 @@ def validate_source(settings):
 
 
 def prepare(config_path, output, only, compile_bundle):
+    csv.field_size_limit(2**31 - 1)
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if (
         not isinstance(config, dict)
