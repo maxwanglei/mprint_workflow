@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import csv
 import sqlite3
 import sys
@@ -173,14 +174,22 @@ def copy_tables(directory, sink):
         with ExitStack() as stack:
             if path.suffix == ".parquet":
                 db = stack.enter_context(duckdb.connect(config=DUCKDB_CONFIG))
-                result = db.read_parquet(str(path)).execute()
-                columns = result.columns
-                untyped = [c for c, t in zip(columns, result.types, strict=True) if t != "VARCHAR"]
+                relation = db.read_parquet(str(path))
+                columns = relation.columns
+                untyped = [
+                    c for c, t in zip(columns, relation.types, strict=True) if t != "VARCHAR"
+                ]
+                if untyped:
+                    # A column with no values carries no type information to lose.
+                    filled = relation.aggregate(
+                        ", ".join(f'count("{c.replace(chr(34), chr(34) * 2)}")' for c in untyped)
+                    ).fetchone()
+                    untyped = [c for c, n in zip(untyped, filled, strict=True) if n]
                 if untyped:
                     raise ValueError(
                         f"{path}: non-text column(s) {untyped}; store values as strings"
                     )
-                rows = _parquet_rows(result, columns)
+                rows = _parquet_rows(relation.execute(), columns)
             else:
                 file = stack.enter_context(path.open(encoding="utf-8-sig", newline=""))
                 reader = csv.DictReader(file, delimiter="\t" if path.suffix == ".tsv" else ",")
@@ -285,6 +294,11 @@ def validate_source(settings):
         raise ValueError(f"missing required option {missing[0]!r}")
     for option in sorted(TEXT_OPTIONS & settings.keys()):
         _text(settings[option], option)
+    if "encoding" in settings:
+        try:
+            codecs.lookup(settings["encoding"])
+        except LookupError:
+            raise ValueError(f"unknown encoding {settings['encoding']!r}") from None
     return kind
 
 

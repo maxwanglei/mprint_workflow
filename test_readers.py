@@ -221,3 +221,22 @@ def test_drugsfda_reads_cp1252(run_source, read_rows):
     text = PRODUCTS.replace("\tEXAMPLE\t", "\tEXAMPLE®\t")
     out = run_source({**DRUGSFDA, "encoding": "cp1252"}, {"Products.txt": text.encode("cp1252")})
     assert "EXAMPLE®" in {r["concept_name"] for r in read_rows(out, "concepts")}
+
+
+def test_excluded_tty_atom_adds_no_native_xref(run_source, read_rows):
+    mrconso = (
+        "C1|ENG|P|L|PF|S1|Y|A1||||RXNORM|IN|111|Drug A||N||\n"
+        "C1|ENG|S|L|PF|S2|N|A2||||MSH|MH|D000001|Drug A heading||N||\n"
+    )
+    out = run_source({**UMLS, "sources": ["RXNORM", "MSH"], "ttys": ["IN"]}, {"m.rrf": mrconso})
+    keys = sorted((r["key_type"], r["key_value"]) for r in read_rows(out, "xrefs"))
+    assert keys == [("RxNorm", "111"), ("UMLS_CUI", "C1")]
+
+
+def test_blank_name_on_excluded_atom_is_ignored(run_source, read_rows):
+    mrconso = (
+        "C1|ENG|P|L|PF|S1|Y|A1||||RXNORM|IN|111|Drug A||N||\n"
+        "C2|ENG|P|L|PF|S2|Y|A2||||RXNORM|BN|222|||N||\n"
+    )
+    out = run_source({**UMLS, "sources": ["RXNORM"], "ttys": ["IN"]}, {"m.rrf": mrconso})
+    assert [r["concept_code"] for r in read_rows(out, "concepts")] == ["C1"]

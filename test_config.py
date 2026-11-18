@@ -42,3 +42,16 @@ def test_null_license_fails_before_reading(run_source):
 def test_ncit_empty_semantic_types_is_rejected(run_source):
     with pytest.raises(ValueError, match="semantic_types must be a nonempty list"):
         run_source({**NCIT, "semantic_types": []}, {"t.txt": ROW})
+
+
+def test_unknown_encoding_is_a_config_error(run_source):
+    with pytest.raises(ValueError, match="source 'src': unknown encoding 'bogus'"):
+        run_source(
+            {
+                "format": "drugsfda",
+                "vocabulary_id": "V",
+                "release": "r",
+                "path": "x.txt",
+                "encoding": "bogus",
+            }
+        )

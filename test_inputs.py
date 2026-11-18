@@ -112,3 +112,12 @@ def test_parquet_identifiers_must_be_text(run_source, tmp_path):
     ).write_parquet(str(tmp_path / "t" / "concepts.parquet"))
     with pytest.raises(ValueError, match=r"non-text column\(s\) \['concept_code'\]"):
         run_source(TABLES, {"t/vocabularies.yaml": DECLARATION})
+
+
+def test_parquet_all_null_optional_column_is_accepted(run_source, read_rows, tmp_path):
+    (tmp_path / "t").mkdir()
+    duckdb.sql(
+        "SELECT 'V' AS vocabulary_id, '1' AS concept_code, 'a' AS concept_name, NULL AS status"
+    ).write_parquet(str(tmp_path / "t" / "concepts.parquet"))
+    out = run_source(TABLES, {"t/vocabularies.yaml": DECLARATION})
+    assert [(r["concept_code"], r["status"]) for r in read_rows(out, "concepts")] == [("1", "")]

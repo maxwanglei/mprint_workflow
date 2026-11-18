@@ -73,7 +73,7 @@ def _atoms(
         # An atom outside the TTY filter still counts toward code cardinality.
         if not kept and key is None:
             continue
-        if not cui or not name.strip() or not tty:
+        if not cui or not tty or (kept and not name.strip()):
             raise ValueError(f"{path}:{number}: missing UMLS CUI, name or term type")
         # P/PF/Y identifies the preferred atom. A filtered subset can
         # lack that atom; rank retained names deterministically in that case.
@@ -169,12 +169,12 @@ def _read_atoms(
     # UMLS can collapse several source codes to one CUI, or split one
     # source code across CUIs. Neither establishes a unique identity.
     rows = db.execute(
-        "WITH pairs AS (SELECT DISTINCT cui, key_type, code FROM atoms "
-        "WHERE key_type IS NOT NULL), counted AS (SELECT *, "
+        "WITH pairs AS (SELECT cui, key_type, code, max(kept) AS kept FROM atoms "
+        "WHERE key_type IS NOT NULL GROUP BY cui, key_type, code), counted AS (SELECT *, "
         "count(*) OVER (PARTITION BY cui, key_type) AS codes_per_cui, "
         "count(*) OVER (PARTITION BY key_type, code) AS cuis_per_code FROM pairs) "
         "SELECT cui, key_type, code FROM counted WHERE codes_per_cui=1 AND cuis_per_code=1 "
-        "AND cui IN (SELECT cui FROM atoms WHERE kept) ORDER BY cui, key_type"
+        "AND kept ORDER BY cui, key_type"
     )
     for cui, key_type, code in rows:
         sink.add(
