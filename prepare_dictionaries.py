@@ -17,9 +17,16 @@ from zipfile import BadZipFile
 import duckdb
 import yaml
 
-# Also allow "python mprint_workflow/prepare_dictionaries.py" from a source checkout.
+# Also allow "python prepare_dictionaries.py" from a checkout or unpacked sdist of any name.
 if __name__ == "__main__" and not __package__:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import importlib.util
+
+    _here = Path(__file__).resolve().parent
+    _spec = importlib.util.spec_from_file_location(
+        "mprint_workflow", _here / "__init__.py", submodule_search_locations=[str(_here)]
+    )
+    sys.modules["mprint_workflow"] = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(sys.modules["mprint_workflow"])
     __package__ = "mprint_workflow"
 
 from .athena import import_athena

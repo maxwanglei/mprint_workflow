@@ -3,6 +3,10 @@
 import csv
 import hashlib
 import json
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import duckdb
@@ -10,7 +14,7 @@ import pytest
 import yaml
 
 from mprint_workflow.bundle import normalize_name
-from mprint_workflow.prepare_dictionaries import prepare
+from mprint_workflow.prepare_dictionaries import main, prepare
 
 DEMO = Path(__file__).parent / "demo" / "sources.yaml"
 
@@ -116,3 +120,44 @@ def test_shared_fda_name_keeps_both_product_keys_and_strengths(tmp_path):
         ("000123", "Example drug", "5MG"),
         ("000123", "Example drug", "10MG"),
     ]
+
+
+def test_cli_writes_demo(tmp_path, monkeypatch, capsys):
+    argv = ["mprint-prepare", "--config", str(DEMO), "--output", str(tmp_path / "o"), "--build"]
+    monkeypatch.setattr(sys, "argv", argv)
+    main()
+    assert "concepts.csv: 3 rows" in capsys.readouterr().out
+
+
+def test_cli_reports_bad_config(tmp_path, monkeypatch, capsys):
+    config = tmp_path / "c.yaml"
+    config.write_text("sources: {}\n")
+    argv = ["mprint-prepare", "--config", str(config), "--output", str(tmp_path / "o")]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+    assert exit_info.value.code == 1
+    assert "error: config must contain a nonempty 'sources' mapping" in capsys.readouterr().err
+
+
+def test_script_runs_from_a_checkout_with_any_folder_name(tmp_path):
+    checkout = tmp_path / "mprint_drug_dictionaries-0.1.0"
+    shutil.copytree(
+        Path(__file__).parent, checkout, ignore=shutil.ignore_patterns(".*", "dist", "docs")
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "prepare_dictionaries.py",
+            "--config",
+            "demo/sources.yaml",
+            "--output",
+            "o",
+        ],
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+        env={k: v for k, v in os.environ.items() if k != "PYTHONPATH"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "concepts.csv: 3 rows" in result.stdout
