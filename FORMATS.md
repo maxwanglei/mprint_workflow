@@ -55,7 +55,7 @@ Only atoms with `SUPPRESS=N` enter the dictionary. For each retained CUI the rea
 
 ### `mesh` — MeSH descriptors and supplementary concept records
 
-Supply `descriptors` or `supplemental` or both. Each is an NLM release XML file, plain or `.gz`. Optional `descriptor_tree_prefixes`, for example `[D]` or `[D03]`, retains descriptors with a matching `TreeNumberList/TreeNumber` prefix. Optional `scr_classes`, for example `[1]`, selects `SupplementalRecord/@SCRClass` from classes 1–6. The example selects the chemicals/drugs tree and chemical supplementary records. [MeSH downloads](https://www.nlm.nih.gov/databases/download/mesh.html) · [MeSH XML elements](https://www.nlm.nih.gov/mesh/xml_data_elements.html)
+Supply `descriptors` or `supplemental` or both. Each is an NLM release XML file, plain or `.gz`. Optional `descriptor_tree_prefixes`, for example `[D]` or `[D03]`, retains descriptors with a matching `TreeNumberList/TreeNumber` prefix. Optional `scr_classes`, for example `[1]`, selects `SupplementalRecord/@SCRClass` from classes 1–6. The example selects the chemicals/drugs tree and chemical supplementary records. Each configured file must contribute at least one record after filtering. [MeSH downloads](https://www.nlm.nih.gov/databases/download/mesh.html) · [MeSH XML elements](https://www.nlm.nih.gov/mesh/xml_data_elements.html)
 
 | Input | XML path to record | Identifier and label within each record |
 | --- | --- | --- |

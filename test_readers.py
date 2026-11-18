@@ -1,5 +1,6 @@
 """Native release readers handle the shapes real and exported releases take."""
 
+import gzip
 import io
 import zipfile
 
@@ -98,3 +99,50 @@ def test_gsrs_zip_with_readme_member(run_source, read_rows):
     out = run_source({"format": "gsrs", **NATIVE, "path": "UNIIs.zip"}, {"UNIIs.zip": data})
     assert [r["concept_code"] for r in read_rows(out, "concepts")] == ["R16CO5Y76E"]
     assert [r["synonym"] for r in read_rows(out, "synonyms")] == ["Aspirin"]
+
+
+DESCRIPTORS = """<DescriptorRecordSet>
+<DescriptorRecord><DescriptorUI>D000001</DescriptorUI>
+<DescriptorName><String>Label</String></DescriptorName>
+<TreeNumberList><TreeNumber>D01.123</TreeNumber></TreeNumberList>
+<ConceptList>
+<Concept PreferredConceptYN="Y"><RegistryNumber>ABCDEFGHIJ</RegistryNumber><TermList>
+<Term><String>Label</String></Term>
+<Term LexicalTag="NON"><String>Alias</String></Term>
+<Term IsPermutedTermYN="Y"><String>Permuted</String></Term>
+</TermList></Concept>
+<Concept PreferredConceptYN="N"><TermList><Term><String>Narrower</String></Term></TermList></Concept>
+</ConceptList></DescriptorRecord>
+<DescriptorRecord><DescriptorUI>D000002</DescriptorUI>
+<DescriptorName><String>Disease</String></DescriptorName>
+<TreeNumberList><TreeNumber>C01</TreeNumber></TreeNumberList>
+<ConceptList><Concept PreferredConceptYN="Y"/></ConceptList></DescriptorRecord>
+</DescriptorRecordSet>"""
+SUPPLEMENTAL = """<SupplementalRecordSet>
+<SupplementalRecord SCRClass="2"><SupplementalRecordUI>C000001</SupplementalRecordUI>
+<SupplementalRecordName><String>Protocol</String></SupplementalRecordName>
+<ConceptList><Concept PreferredConceptYN="Y"/></ConceptList></SupplementalRecord>
+</SupplementalRecordSet>"""
+MESH = {"format": "mesh", **NATIVE, "descriptors": "d.xml"}
+
+
+def test_mesh_file_with_no_matching_records(run_source):
+    with pytest.raises(ValueError, match="no SupplementalRecord records match"):
+        run_source(
+            {**MESH, "supplemental": "s.xml", "scr_classes": [1]},
+            {"d.xml": DESCRIPTORS, "s.xml": SUPPLEMENTAL},
+        )
+
+
+def test_mesh_descriptor_aliases_and_unii(run_source, read_rows):
+    out = run_source(
+        {**MESH, "descriptors": "d.xml.gz", "descriptor_tree_prefixes": ["D01"]},
+        {"d.xml.gz": gzip.compress(DESCRIPTORS.encode())},
+    )
+    assert [r["concept_code"] for r in read_rows(out, "concepts")] == ["D000001"]
+    assert [(r["synonym"], r["synonym_type"]) for r in read_rows(out, "synonyms")] == [
+        ("Alias", "NON")
+    ]
+    assert [(r["key_type"], r["key_value"]) for r in read_rows(out, "xrefs")] == [
+        ("UNII", "ABCDEFGHIJ")
+    ]

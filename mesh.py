@@ -117,7 +117,7 @@ def read_mesh(config: Mapping[str, Any], sink: Any) -> None:
                         include = not scr_classes or element.get("SCRClass") in scr_classes
                     if include:
                         _record(element, vocabulary, path, sink)
+                        count += 1
                     root.remove(element)
-                    count += 1
             if count == 0:
-                raise ValueError(f"{path}: no {tag} records")
+                raise ValueError(f"{path}: no {tag} records match the configured filters")
