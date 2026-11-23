@@ -13,7 +13,8 @@ sources:
     vocabularies: [RxNorm, RxNorm Extension, SNOMED, ATC]
     domains:
       SNOMED: [Drug]
-    # Versions are read from VOCABULARY.csv.
+    # Versions are read from VOCABULARY.csv. Optional `relationships` replaces the
+    # default set of Athena relations carried; see FORMATS.md.
   umls:
     format: umls
     vocabulary_id: UMLS
@@ -24,6 +25,7 @@ sources:
     ttys: [IN, PIN, MIN, BN, SCD, SBD, MH, NM, PT, SY]
     mrsty: raw/umls/META/MRSTY.RRF
     semantic_types: [T121, T195, T200]  # Example drug-focused starting subset.
+    # code_identity: preferred  # default; `any` keys only codes with no name in a second CUI
   mesh:
     format: mesh
     vocabulary_id: MeSH
@@ -37,6 +39,7 @@ sources:
     vocabulary_id: UNII
     release: REPLACE_WITH_RELEASE
     path: raw/gsrs/UNIIs.zip
+    records: raw/gsrs/UNII_Data.zip  # optional: RxNorm, NCIt and PubChem keys
   ncit:
     format: ncit
     vocabulary_id: NCIt
@@ -48,6 +51,8 @@ sources:
     vocabulary_id: DrugBank
     release: REPLACE_WITH_RELEASE
     path: raw/drugbank/full database.xml
+    # salts: true                 # default: salts become concepts with a salt_of edge
+    # external_identifiers: {RxCUI: RxNorm, ChEBI: ChEBI}  # optional; replaces the default map
   drugsfda:
     format: drugsfda
     vocabulary_id: Drugs@FDA

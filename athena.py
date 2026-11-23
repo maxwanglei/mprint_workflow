@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+import re
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -30,14 +32,40 @@ _RXNORM_CLASSES = {
     "Branded Dose Group": "SBDG",
     "Clinical Pack": "GPCK",
     "Branded Pack": "BPCK",
+    # RxNorm gives quantified drugs the SCD and SBD term types.
+    "Quant Clinical Drug": "SCD",
+    "Quant Branded Drug": "SBD",
 }
-_PREDICATES = {
+# Athena stores every relationship in both directions. Each entry keeps one
+# direction and names it after the source relation, so a consumer can choose
+# which kinds of connection to follow. Override with the `relationships` option.
+DEFAULT_PREDICATES = {
+    # RxNorm and RxNorm Extension drug model
     "RxNorm has ing": "has_ingredient",
     "Has precise ing": "has_precise_ingredient",
     "Has tradename": "has_tradename",
     "RxNorm has dose form": "has_dose_form",
     "Consists of": "consists_of",
+    "Brand name of": "brand_name_of",
+    "Form of": "form_of",
+    # OMOP mappings, for example a multiple-ingredient concept to each ingredient
+    "Maps to": "maps_to",
+    # Hierarchies (SNOMED, ATC)
+    "Is a": "is_a",
+    # SNOMED drug model
+    "Has active ing": "has_active_ingredient",
+    "Has prec ingredient": "has_precise_active_ingredient",
+    "Has basis str subst": "has_basis_of_strength_substance",
+    "Has dose form": "has_dose_form",
+    "SNOMED - RxNorm eq": "snomed_rxnorm_eq",
+    # ATC classes to RxNorm ingredients and drug forms
+    "ATC - RxNorm pr lat": "atc_rxnorm_pr_lat",
+    "ATC - RxNorm sec lat": "atc_rxnorm_sec_lat",
+    "ATC - RxNorm pr up": "atc_rxnorm_pr_up",
+    "ATC - RxNorm sec up": "atc_rxnorm_sec_up",
+    "ATC - RxNorm": "atc_rxnorm",
 }
+_PREDICATE_NAME = re.compile(r"[a-z][a-z0-9_]*")
 
 _INPUT_COLUMNS = {
     "VOCABULARY": ("vocabulary_id", "vocabulary_name", "vocabulary_version"),
@@ -62,6 +90,7 @@ def _read_inputs(db: duckdb.DuckDBPyConnection, source: Path, *, need_domain: bo
     for table, required in _INPUT_COLUMNS.items():
         path = source / f"{table}.csv"
         if not path.exists() and table not in ("VOCABULARY", "CONCEPT"):
+            print(f"{path}: absent; the import has no {table} rows", file=sys.stderr)
             schema = ", ".join(f"{field} VARCHAR" for field in required)
             db.execute(f"CREATE TEMP TABLE {table} ({schema})")
             continue
@@ -93,10 +122,26 @@ def _string_list(value: Any) -> bool:
     )
 
 
+def _predicates(config: Mapping[str, Any]) -> dict[str, str]:
+    """The Athena relationship IDs to keep, each with its output predicate."""
+    chosen = config.get("relationships", DEFAULT_PREDICATES)
+    if (
+        not isinstance(chosen, dict)
+        or not chosen
+        or not all(isinstance(k, str) and k.strip() for k in chosen)
+        or not all(isinstance(v, str) and _PREDICATE_NAME.fullmatch(v) for v in chosen.values())
+    ):
+        raise ValueError(
+            "athena.relationships must map Athena relationship IDs to lower_snake_case predicates"
+        )
+    return {key.strip(): value for key, value in chosen.items()}
+
+
 def import_athena(config: Mapping[str, Any], source: Path, work: Path) -> Path:
     """Select and transform an Athena release; return its Parquet table directory."""
     vocabularies = config.get("vocabularies")
     domains = config.get("domains", {})
+    predicates = _predicates(config)
     if not _string_list(vocabularies):
         raise ValueError("athena.vocabularies must be a nonempty list of vocabulary IDs")
     if not isinstance(domains, dict) or domains.keys() - set(vocabularies):
@@ -125,7 +170,7 @@ def import_athena(config: Mapping[str, Any], source: Path, work: Path) -> Path:
                     f"{source}/VOCABULARY.csv: missing vocabulary IDs {sorted(missing)}"
                 )
             _select_concepts(db, vocabularies, domains)
-            _write_tables(db, staged)
+            _write_tables(db, staged, predicates)
         declaration = {
             "vocabularies": [
                 {
@@ -170,9 +215,11 @@ def _select_concepts(
         raise ValueError(f"no Athena concepts match the configured selection for {sorted(missing)}")
 
 
-def _write_tables(db: duckdb.DuckDBPyConnection, directory: Path) -> None:
+def _write_tables(
+    db: duckdb.DuckDBPyConnection, directory: Path, predicates: Mapping[str, str]
+) -> None:
     db.execute("CREATE TEMP TABLE predicates(relationship_id VARCHAR, predicate VARCHAR)")
-    db.executemany("INSERT INTO predicates VALUES (?, ?)", list(_PREDICATES.items()))
+    db.executemany("INSERT INTO predicates VALUES (?, ?)", list(predicates.items()))
     # CONCEPT_RELATIONSHIP can be large. Retain only current outgoing links
     # from this vocabulary/domain subset and read that release file once.
     db.execute("""
@@ -208,20 +255,29 @@ def _write_tables(db: duckdb.DuckDBPyConnection, directory: Path) -> None:
         FROM concept_synonym y JOIN selected s USING(concept_id)
         WHERE trim(y.concept_synonym_name) <> ''
     """)
+    # One row per edge; assertion_source names every Athena table or
+    # relationship that asserts it.
     db.execute("""
         CREATE TEMP VIEW relationships AS
-        SELECT a.vocabulary_id AS vocabulary_id_1, a.concept_code AS concept_code_1, p.predicate,
-            b.vocabulary_id AS vocabulary_id_2, b.concept_code AS concept_code_2
-        FROM edges r JOIN predicates p USING(relationship_id)
-        JOIN selected a ON r.concept_id_1 = a.concept_id
-        JOIN selected b ON r.concept_id_2 = b.concept_id
-        UNION
-        SELECT d.vocabulary_id, d.concept_code, 'has_ingredient', a.vocabulary_id, a.concept_code
-        FROM concept_ancestor x JOIN selected a ON a.concept_id = x.ancestor_concept_id
-        JOIN selected d ON d.concept_id = x.descendant_concept_id
-        WHERE a.concept_id <> d.concept_id AND a.concept_class_id = 'Ingredient'
-          AND a.vocabulary_id IN ('RxNorm', 'RxNorm Extension')
-          AND d.vocabulary_id IN ('RxNorm', 'RxNorm Extension')
+        WITH asserted AS (
+            SELECT a.vocabulary_id AS vocabulary_id_1, a.concept_code AS concept_code_1,
+                p.predicate, b.vocabulary_id AS vocabulary_id_2,
+                b.concept_code AS concept_code_2, 'OMOP ' || r.relationship_id AS source
+            FROM edges r JOIN predicates p USING(relationship_id)
+            JOIN selected a ON r.concept_id_1 = a.concept_id
+            JOIN selected b ON r.concept_id_2 = b.concept_id
+            UNION ALL
+            SELECT d.vocabulary_id, d.concept_code, 'has_ingredient', a.vocabulary_id,
+                a.concept_code, 'OMOP CONCEPT_ANCESTOR'
+            FROM concept_ancestor x JOIN selected a ON a.concept_id = x.ancestor_concept_id
+            JOIN selected d ON d.concept_id = x.descendant_concept_id
+            WHERE a.concept_id <> d.concept_id AND a.concept_class_id = 'Ingredient'
+              AND a.vocabulary_id IN ('RxNorm', 'RxNorm Extension')
+              AND d.vocabulary_id IN ('RxNorm', 'RxNorm Extension')
+        )
+        SELECT vocabulary_id_1, concept_code_1, predicate, vocabulary_id_2, concept_code_2,
+            array_to_string(list_sort(list(DISTINCT source)), '; ') AS assertion_source
+        FROM asserted GROUP BY ALL
     """)
     db.execute("""
         CREATE TEMP VIEW xrefs AS

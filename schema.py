@@ -33,6 +33,7 @@ SYNONYMS = TableSpec(
 RELATIONSHIPS = TableSpec(
     "relationships",
     ("vocabulary_id_1", "concept_code_1", "predicate", "vocabulary_id_2", "concept_code_2"),
+    ("assertion_source",),
 )
 XREFS = TableSpec(
     "xrefs", ("vocabulary_id", "concept_code", "key_type", "key_value"), ("assertion_source",)

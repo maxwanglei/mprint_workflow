@@ -4,6 +4,8 @@ Set `mrconso` to the RRF file (optionally gzip-compressed), and `sources` to a
 nonempty list of permitted source abbreviations. `language` defaults to ENG.
 An optional `ttys` list restricts accepted term types. Pair `mrsty` with
 `semantic_types` to select CUIs with at least one of the listed TUIs.
+`code_identity` (default `preferred`) decides which atoms place a source code
+in a CUI for its cross-reference; `any` counts every atom of the code.
 Use the bundle's
 `source_aliases` to reconcile the original SAB on each name with native sources.
 """
@@ -29,6 +31,14 @@ def _allowed(config: Mapping[str, Any], key: str) -> set[str]:
     ):
         raise ValueError(f"UMLS {key} must be a nonempty list of strings")
     return {value.strip() for value in values}
+
+
+# The term type of the name each source gives its own code. With
+# code_identity: preferred, only these atoms place a code in a CUI. UMLS also
+# files a code's other names elsewhere, for example an NCI brand name (BN)
+# under the brand's own CUI; those names do not move the code's identity.
+_IDENTITY_TTYS = {"NCI": {"PT"}, "DRUGBANK": {"IN"}, "SNOMEDCT_US": {"FN"}}
+_CODE_IDENTITY = ("preferred", "any")
 
 
 def _native_key(sab: str, tty: str, code: str) -> str | None:
@@ -62,8 +72,8 @@ def _rrf(path: Path, columns: int) -> Iterator[tuple[int, list[str]]]:
 
 
 def _atoms(
-    path: Path, sources: set[str], language: str, ttys: set[str] | None
-) -> Iterator[tuple[str, str, str, str, int, str | None, str, bool]]:
+    path: Path, sources: set[str], language: str, ttys: set[str] | None, identity: str
+) -> Iterator[tuple[str, str, str, str, int, str | None, str, bool, bool]]:
     for number, fields in _rrf(path, 18):
         cui, lat, ts, _, stt, _, ispref, _, _, _, _, sab, tty, code, name, _, suppress, _ = fields
         if lat != language or sab not in sources or suppress != "N":
@@ -78,7 +88,8 @@ def _atoms(
         # P/PF/Y identifies the preferred atom. A filtered subset can
         # lack that atom; rank retained names deterministically in that case.
         rank = 4 * (ts != "P") + 2 * (stt != "PF") + (ispref != "Y")
-        yield cui, name.strip(), sab, tty, rank, key, code, kept
+        names_code = identity == "any" or sab not in _IDENTITY_TTYS or tty in _IDENTITY_TTYS[sab]
+        yield cui, name.strip(), sab, tty, rank, key, code, kept, names_code
 
 
 def read_umls(config: Mapping[str, Any], sink: Any) -> None:
@@ -87,6 +98,9 @@ def read_umls(config: Mapping[str, Any], sink: Any) -> None:
     ttys = _allowed(config, "ttys") if "ttys" in config else None
     if ("mrsty" in config) != ("semantic_types" in config):
         raise ValueError("UMLS semantic type filtering needs both mrsty and semantic_types")
+    identity = config.get("code_identity", "preferred")
+    if identity not in _CODE_IDENTITY:
+        raise ValueError(f"UMLS code_identity must be one of {list(_CODE_IDENTITY)}")
     language = config.get("language", "ENG")
     if not isinstance(language, str) or not re.fullmatch("[A-Z]{3}", language):
         raise ValueError("UMLS language must be a three-letter MRCONSO LAT value such as ENG")
@@ -102,7 +116,7 @@ def read_umls(config: Mapping[str, Any], sink: Any) -> None:
         # the database location. The setting is process-wide, so restore it.
         db.execute(f"PRAGMA temp_store_directory = '{directory.replace(chr(39), chr(39) * 2)}'")
         try:
-            _read_atoms(config, sink, db, path, sources, language, ttys)
+            _read_atoms(config, sink, db, path, sources, language, ttys, identity)
         finally:
             db.execute("PRAGMA temp_store_directory = ''")
 
@@ -115,13 +129,15 @@ def _read_atoms(
     sources: set[str],
     language: str,
     ttys: set[str] | None,
+    identity: str,
 ) -> None:
     vocabulary = config["vocabulary_id"]
     db.execute(
         "CREATE TABLE atoms(cui TEXT, name TEXT, sab TEXT, tty TEXT, "
-        "rank INTEGER, key_type TEXT, code TEXT, kept INTEGER)"
+        "rank INTEGER, key_type TEXT, code TEXT, identity INTEGER, kept INTEGER)"
     )
-    insert = "INSERT INTO atoms SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8"
+    # `kept` is last, so the semantic-type condition below can extend it.
+    insert = "INSERT INTO atoms SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?9, ?8"
     if "mrsty" in config:
         types = _allowed(config, "semantic_types")
         if not all(re.fullmatch(r"T[0-9]{3}", value) for value in types):
@@ -132,7 +148,7 @@ def _read_atoms(
             ((row[0],) for _, row in _rrf(Path(sink.path(config["mrsty"])), 6) if row[1] in types),
         )
         insert += " AND ?1 IN (SELECT cui FROM eligible)"
-    db.executemany(insert, _atoms(path, sources, language, ttys))
+    db.executemany(insert, _atoms(path, sources, language, ttys, identity))
     previous = None
     for cui, name, sab, tty in db.execute(
         "SELECT cui, name, sab, tty FROM atoms WHERE kept ORDER BY cui, rank, name, sab, tty"
@@ -167,12 +183,14 @@ def _read_atoms(
         raise ValueError(f"{path}: no unsuppressed UMLS atoms match the requested filters")
 
     # UMLS can collapse several source codes to one CUI, or split one
-    # source code across CUIs. Neither establishes a unique identity.
+    # source code across CUIs. Neither establishes a unique identity. Only
+    # atoms that name their code (all atoms with code_identity: any) place
+    # it; any retained atom of the code in that CUI keeps the pair.
     rows = db.execute(
-        "WITH pairs AS (SELECT cui, key_type, code, max(kept) AS kept FROM atoms "
-        "WHERE key_type IS NOT NULL GROUP BY cui, key_type, code), counted AS (SELECT *, "
-        "count(*) OVER (PARTITION BY cui, key_type) AS codes_per_cui, "
-        "count(*) OVER (PARTITION BY key_type, code) AS cuis_per_code FROM pairs) "
+        "WITH pairs AS (SELECT cui, key_type, code, max(kept) AS kept, max(identity) AS names "
+        "FROM atoms WHERE key_type IS NOT NULL GROUP BY cui, key_type, code), "
+        "counted AS (SELECT *, count(*) OVER (PARTITION BY cui, key_type) AS codes_per_cui, "
+        "count(*) OVER (PARTITION BY key_type, code) AS cuis_per_code FROM pairs WHERE names) "
         "SELECT cui, key_type, code FROM counted WHERE codes_per_cui=1 AND cuis_per_code=1 "
         "AND kept ORDER BY cui, key_type"
     )

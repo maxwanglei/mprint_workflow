@@ -62,13 +62,13 @@ READERS = {
 
 
 OPTIONS = {
-    "athena": {"path", "vocabularies", "domains", "license"},
+    "athena": {"path", "vocabularies", "domains", "license", "relationships"},
     "tables": {"path"},
-    "umls": {"mrconso", "sources", "language", "ttys", "mrsty", "semantic_types"},
+    "umls": {"mrconso", "sources", "language", "ttys", "mrsty", "semantic_types", "code_identity"},
     "mesh": {"descriptors", "supplemental", "descriptor_tree_prefixes", "scr_classes"},
     "ncit": {"path", "semantic_types"},
-    "drugbank": {"path"},
-    "gsrs": {"path"},
+    "drugbank": {"path", "external_identifiers", "salts"},
+    "gsrs": {"path", "records"},
     "drugsfda": {"path", "encoding", "applications"},
     "orange_book": {"path", "encoding"},
     "article57": {"path", "encoding", "sheet", "code_column"},
@@ -97,6 +97,7 @@ TEXT_OPTIONS = frozenset(
         "vocabulary_id",
         "license",
         "applications",
+        "records",
     }
 )
 INPUT_ERRORS = (

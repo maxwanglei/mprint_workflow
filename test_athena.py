@@ -128,7 +128,17 @@ class AthenaTests(unittest.TestCase):
         )
         self.assertEqual(
             self.read(output, "relationships"),
-            [("RxNorm Extension", "005", "has_ingredient", "RxNorm", "001")],
+            [
+                (
+                    "RxNorm Extension",
+                    "005",
+                    "has_ingredient",
+                    "RxNorm",
+                    "001",
+                    "OMOP CONCEPT_ANCESTOR; OMOP RxNorm has ing",
+                ),
+                ("SNOMED", "100", "maps_to", "RxNorm", "001", "OMOP Maps to"),
+            ],
         )
         keys = self.read(output, "xrefs")
         self.assertIn(("SNOMED", "100", "OMOP_STANDARD", "1", "OMOP"), keys)
@@ -139,6 +149,53 @@ class AthenaTests(unittest.TestCase):
             {(v["release"], v["license"]) for v in declaration["vocabularies"]},
             {("2026", "fixture"), ("3", "fixture"), ("999", "fixture")},
         )
+
+    def test_brand_salt_and_quantified_concepts(self):
+        self.write(
+            "CONCEPT",
+            [
+                "concept_id\tconcept_name\tdomain_id\tvocabulary_id\tconcept_class_id\tstandard_concept\tconcept_code\tvalid_start_date\tvalid_end_date\tinvalid_reason",
+                "1\tatorvastatin\tDrug\tRxNorm\tIngredient\tS\t83367\t19700101\t20991231\t",
+                "2\tLipitor\tDrug\tRxNorm\tBrand Name\t\t153165\t19700101\t20991231\t",
+                "3\tatorvastatin calcium\tDrug\tRxNorm\tPrecise Ingredient\t\t83366\t19700101\t20991231\t",
+                "4\t0.5 ML x 10 MG/ML Injection\tDrug\tRxNorm\tQuant Clinical Drug\tS\t900\t19700101\t20991231\t",
+            ],
+        )
+        self.write(
+            "CONCEPT_RELATIONSHIP",
+            [
+                "concept_id_1\tconcept_id_2\trelationship_id\tinvalid_reason",
+                "2\t1\tBrand name of\t",
+                "1\t2\tHas brand name\t",
+                "3\t1\tForm of\t",
+                "3\t1\tMaps to\t",
+                "1\t3\tHas form\t",
+            ],
+        )
+        self.config = {"vocabularies": ["RxNorm"]}
+        self.write(
+            "VOCABULARY",
+            ["vocabulary_id\tvocabulary_name\tvocabulary_version", "RxNorm\tRxNorm\t2026"],
+        )
+        output = self.run_import()
+        edges = {r[:5] for r in self.read(output, "relationships")}
+        self.assertEqual(
+            edges,
+            {
+                ("RxNorm", "153165", "brand_name_of", "RxNorm", "83367"),
+                ("RxNorm", "83366", "form_of", "RxNorm", "83367"),
+                ("RxNorm", "83366", "maps_to", "RxNorm", "83367"),
+            },
+        )
+        classes = {r[1]: r[3] for r in self.read(output, "concepts")}
+        self.assertEqual(classes["900"], "SCD")
+
+        self.config["relationships"] = {"Brand name of": "brand_name_of"}
+        output = import_athena(self.config, self.source, self.root / "work2")
+        self.assertEqual({r[2] for r in self.read(output, "relationships")}, {"brand_name_of"})
+        self.config["relationships"] = {"Brand name of": "Brand Name Of"}
+        with self.assertRaisesRegex(ValueError, "lower_snake_case"):
+            import_athena(self.config, self.source, self.root / "work3")
 
     def test_ambiguous_replacement_is_not_guessed(self):
         self.write(

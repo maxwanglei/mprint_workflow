@@ -20,7 +20,15 @@ import time
 from pathlib import Path
 
 NOT_STAGED = {"outputs", "wheels"}
-PATH_OPTIONS = ("path", "mrconso", "mrsty", "descriptors", "supplemental", "applications")
+PATH_OPTIONS = (
+    "path",
+    "mrconso",
+    "mrsty",
+    "descriptors",
+    "supplemental",
+    "applications",
+    "records",
+)
 
 
 def referenced(project: Path, config: str, only: list[str]) -> list[Path]:

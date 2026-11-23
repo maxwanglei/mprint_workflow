@@ -88,7 +88,7 @@ Put each release you have under `raw/`. The paths below match [`sources.example.
 | `athena` | The extracted Athena vocabulary download | `raw/athena/` (contains `CONCEPT.csv` and the other tables) |
 | `umls` | `META/MRCONSO.RRF` and `META/MRSTY.RRF` from the UMLS Metathesaurus | `raw/umls/META/` |
 | `mesh` | The descriptor and supplementary-record XML files | `raw/mesh/desc.xml`, `raw/mesh/supp.xml` |
-| `gsrs` | [`UNIIs.zip`](https://precision.fda.gov/uniisearch/archive/latest/UNIIs.zip) | `raw/gsrs/UNIIs.zip` |
+| `gsrs` | [`UNIIs.zip`](https://precision.fda.gov/uniisearch/archive/latest/UNIIs.zip), and optionally [`UNII_Data.zip`](https://precision.fda.gov/uniisearch/archive/latest/UNII_Data.zip) for RxNorm, NCIt and PubChem codes | `raw/gsrs/UNIIs.zip`, `raw/gsrs/UNII_Data.zip` |
 | `ncit` | `Thesaurus.txt` from [`Thesaurus.FLAT.zip`](https://evs.nci.nih.gov/ftp1/NCI_Thesaurus/Thesaurus.FLAT.zip) | `raw/ncit/Thesaurus.txt` |
 | `drugbank` | The full database XML, or its zip | `raw/drugbank/full database.xml` |
 | `drugsfda` | `Products.txt` and `Applications.txt` from the [Drugs@FDA zip](https://www.fda.gov/media/89850/download) | `raw/drugsfda/` |

@@ -24,7 +24,7 @@ For `umls`, `mesh`, `gsrs`, `ncit`, `drugbank`, `drugsfda`, `orange_book` and `a
 
 ### `athena` — RxNorm, RxNorm Extension, SNOMED CT and ATC
 
-Set `path` to an extracted Athena download and `vocabularies` to a nonempty list of Athena vocabulary IDs, for example `[RxNorm, RxNorm Extension, SNOMED, ATC]`. Optional `domains` maps a selected ID to a nonempty list, for example `{SNOMED: [Drug]}`. Optional `license` applies to the selected vocabularies. `VOCABULARY.csv` supplies each vocabulary's release version. A blank version is recorded as `unversioned`. [OHDSI Athena](https://athena.ohdsi.org/) · [OMOP vocabulary fields](https://ohdsi.github.io/CommonDataModel/cdm54.html)
+Set `path` to an extracted Athena download and `vocabularies` to a nonempty list of Athena vocabulary IDs, for example `[RxNorm, RxNorm Extension, SNOMED, ATC]`. Optional `domains` maps a selected ID to a nonempty list, for example `{SNOMED: [Drug]}`. Optional `license` applies to the selected vocabularies. Optional `relationships` maps Athena `relationship_id` values to the lower_snake_case predicates to write, and replaces the default set below. `VOCABULARY.csv` supplies each vocabulary's release version. A blank version is recorded as `unversioned`. [OHDSI Athena](https://athena.ohdsi.org/) · [OMOP vocabulary fields](https://ohdsi.github.io/CommonDataModel/cdm54.html)
 
 The native files are UTF-8 tab-delimited text with headers and literal quotation marks. Their `.csv` filenames are significant. Extra release columns are permitted.
 
@@ -32,11 +32,30 @@ The native files are UTF-8 tab-delimited text with headers and literal quotation
 | --- | --- | --- |
 | `CONCEPT.csv` | `concept_id`, `vocabulary_id`, `concept_code`, `concept_name`, `concept_class_id`, `standard_concept`, `valid_start_date`, `valid_end_date`, `invalid_reason` | Required. Also supply `domain_id` when filtering domains. `concept_code` is the native vocabulary code. OMOP `concept_id` identifies the row across Athena tables. Native dates use `YYYYMMDD`. |
 | `VOCABULARY.csv` | `vocabulary_id`, `vocabulary_name`, `vocabulary_version` | Required. One entry for each selected vocabulary. |
-| `CONCEPT_SYNONYM.csv` | `concept_id`, `concept_synonym_name` | Optional. Imports names of selected concepts across the supplied languages. |
+| `CONCEPT_SYNONYM.csv` | `concept_id`, `concept_synonym_name` | Optional. Imports names of selected concepts across the supplied languages. A missing optional file is reported on stderr. |
 | `CONCEPT_RELATIONSHIP.csv` | `concept_id_1`, `concept_id_2`, `relationship_id`, `invalid_reason` | Optional. Supplies typed edges, OMOP mappings and same-vocabulary replacement evidence. |
 | `CONCEPT_ANCESTOR.csv` | `ancestor_concept_id`, `descendant_concept_id` | Optional. Supplies `has_ingredient` edges from retained RxNorm-family descendants to their retained ingredient ancestors. |
 
-OMOP invalid reasons `D` and `U` become `obsolete` and `remapped`. The reader emits `replaced_by` for an unambiguous current same-vocabulary `Concept replaced by` relationship. Eligible direct edges preserve direction. The native relations `RxNorm has ing`, `Has precise ing`, `Has tradename`, `RxNorm has dose form` and `Consists of` become `has_ingredient`, `has_precise_ingredient`, `has_tradename`, `has_dose_form` and `consists_of`, respectively. Both endpoints of an output edge must be retained.
+OMOP invalid reasons `D` and `U` become `obsolete` and `remapped`. The reader emits `replaced_by` for an unambiguous current same-vocabulary `Concept replaced by` relationship. RxNorm-family classes become RxNorm term types; `Quant Clinical Drug` and `Quant Branded Drug` become `SCD` and `SBD`, as RxNorm itself types them.
+
+Athena stores each relationship in both directions. The reader keeps one direction of each, current edges only, with both endpoints retained, and names it after the source relation so that a consumer can choose which kinds of connection to follow:
+
+| Athena `relationship_id` | Predicate | Typical endpoints |
+| --- | --- | --- |
+| `RxNorm has ing` | `has_ingredient` | RxNorm-family drug → ingredient |
+| `Has precise ing` | `has_precise_ingredient` | brand or component → precise ingredient |
+| `Has tradename` | `has_tradename` | clinical drug → branded drug |
+| `RxNorm has dose form` | `has_dose_form` | drug → dose form |
+| `Consists of` | `consists_of` | drug or pack → component |
+| `Brand name of` | `brand_name_of` | brand name → ingredient or branded drug |
+| `Form of` | `form_of` | precise ingredient (salt) → ingredient |
+| `Maps to` | `maps_to` | OMOP mapping, for example a multiple-ingredient concept → each ingredient, or SNOMED → RxNorm |
+| `Is a` | `is_a` | SNOMED and ATC hierarchy, child → parent |
+| `Has active ing`, `Has prec ingredient`, `Has basis str subst`, `Has dose form` | `has_active_ingredient`, `has_precise_active_ingredient`, `has_basis_of_strength_substance`, `has_dose_form` | SNOMED product → substance or form |
+| `SNOMED - RxNorm eq` | `snomed_rxnorm_eq` | SNOMED → RxNorm |
+| `ATC - RxNorm pr lat`, `ATC - RxNorm sec lat`, `ATC - RxNorm pr up`, `ATC - RxNorm sec up`, `ATC - RxNorm` | `atc_rxnorm_pr_lat`, `atc_rxnorm_sec_lat`, `atc_rxnorm_pr_up`, `atc_rxnorm_sec_up`, `atc_rxnorm` | ATC class → RxNorm ingredient or drug form |
+
+`CONCEPT_ANCESTOR.csv` adds `has_ingredient` from each RxNorm-family descendant to its ingredient ancestors. Each edge is written once; `assertion_source` lists every Athena relationship or table that asserts it, for example `OMOP CONCEPT_ANCESTOR; OMOP RxNorm has ing`. `Maps to` targets also remain `OMOP_STANDARD` keys.
 
 ### `umls` — UMLS Metathesaurus
 
@@ -51,7 +70,7 @@ CUI|LAT|TS|LUI|STT|SUI|ISPREF|AUI|SAUI|SCUI|SDUI|SAB|TTY|CODE|STR|SRL|SUPPRESS|C
 CUI|TUI|STN|STY|ATUI|CVF|
 ```
 
-Only atoms with `SUPPRESS=N` enter the dictionary. For each retained CUI the reader prioritizes `TS=P`, `STT=PF` and `ISPREF=Y` in that order, then breaks ties by name, source abbreviation and term type. Each eligible atom contributes its wording, original SAB and TTY. Native-code cross-references require one-to-one correspondence across all unsuppressed atoms of the selected sources and language, before the `ttys` and semantic-type filters, and one of the supported source namespaces (`RxNorm`, `MeSH`, `NCIt`, `SNOMED`, `DrugBank`). For MeSH, only `MH` descriptor headings and `NM` supplementary record names qualify for these links. All retained CUIs also carry an explicit `UMLS_CUI` key.
+Only atoms with `SUPPRESS=N` enter the dictionary. For each retained CUI the reader prioritizes `TS=P`, `STT=PF` and `ISPREF=Y` in that order, then breaks ties by name, source abbreviation and term type. Each eligible atom contributes its wording, original SAB and TTY. Native-code cross-references require one-to-one correspondence between the code and a CUI, across all unsuppressed atoms of the selected sources and language, before the `ttys` and semantic-type filters, and one of the supported source namespaces (`RxNorm`, `MeSH`, `NCIt`, `SNOMED`, `DrugBank`). Only an atom that names its own code places the code in a CUI: MeSH `MH` descriptor headings and `NM` supplementary record names, NCI `PT`, DrugBank `IN`, SNOMED CT `FN`, and every RxNorm atom. UMLS also files a code's other names in other CUIs, for example an NCI brand name (`BN`) recorded under the ingredient's code sits in the brand's CUI; those atoms do not move the code. Set `code_identity: any` to count every atom instead, which drops a code whenever any of its names sits in a second CUI. All retained CUIs also carry an explicit `UMLS_CUI` key.
 
 ### `mesh` — MeSH descriptors and supplementary concept records
 
@@ -66,7 +85,7 @@ Each selected record needs exactly one `ConceptList/Concept` with `PreferredConc
 
 ### `gsrs` — FDA UNII names
 
-Set `path` to FDA `UNIIs.zip` with exactly one member whose filename matches `unii*names*.txt` case-insensitively, or to the extracted names file. This is an unquoted UTF-8 TSV with header fields `UNII`, `DISPLAY_NAME`, `NAME`, `TYPE`. Each UNII is ten uppercase letters/digits and needs one consistent display name. `DISPLAY_NAME` supplies the preferred name. `of`, `sys` and `cn` name types supply official, systematic and common aliases. With `vocabulary_id: UNII` the UNII is the native concept code. [FDA UNII names release](https://www.fda.gov/industry/structured-product-labeling-resources/uniis-preferred-substance-names-and-their-identified-synonyms)
+Set `path` to FDA `UNIIs.zip` with exactly one member whose filename matches `unii*names*.txt` case-insensitively, or to the extracted names file. This is an unquoted UTF-8 TSV with header fields `UNII`, `DISPLAY_NAME`, `NAME`, `TYPE`. Each UNII is ten uppercase letters/digits and needs one consistent display name. `DISPLAY_NAME` supplies the preferred name. `of`, `sys` and `cn` name types supply official, systematic and common aliases. With `vocabulary_id: UNII` the UNII is the native concept code. Optional `records` points to FDA `UNII_Data.zip` (one member matching `unii*records*.txt`) or the extracted records file. Its `RXCUI`, `NCIT` and `PUBCHEM` columns become `RxNorm`, `NCIt` and `PubChem CID` keys on the substances read from the names file, with `assertion_source` `FDA UNII Records`. Malformed values are dropped and counted on stderr. FDA records an RXCUI only for substances it has reviewed; check RxNorm's own UNII attribute for newer drugs. [FDA UNII names release](https://www.fda.gov/industry/structured-product-labeling-resources/uniis-preferred-substance-names-and-their-identified-synonyms)
 
 ### `ncit` — National Cancer Institute Thesaurus
 
@@ -76,11 +95,13 @@ Set `path` to the extracted `Thesaurus.txt` from the NCI FLAT release. The heade
 code   concept IRI   parents   synonyms   definition   display name   concept status   semantic type   [concept in subset]
 ```
 
-Use tab separators and keep empty fields in position. The ninth field is optional. Entries within a multivalued field use `|`. The first nonempty synonym is the preferred name, and later distinct names are aliases. Optional `semantic_types` is a nonempty list of native semantic type names. The reader retains a row if any match. Retired/obsolete source statuses become `obsolete`. [NCI FLAT release layout](https://evs.nci.nih.gov/ftp1/NCI_Thesaurus/ReadMe.txt)
+Use tab separators and keep empty fields in position. The ninth field is optional. Entries within a multivalued field use `|`. The first nonempty synonym is the preferred name, and later distinct names are aliases. The FLAT file does not say which aliases are brand names, code names or chemical names; every alias is written with type `synonym`. Optional `semantic_types` is a nonempty list of native semantic type names. The reader retains a row if any match. Each parent code of a retained concept becomes an `is_a` edge when the parent is retained too. Retired/obsolete source statuses become `obsolete`. [NCI FLAT release layout](https://evs.nci.nih.gov/ftp1/NCI_Thesaurus/ReadMe.txt)
 
 ### `drugbank` — DrugBank full database
 
-Set `path` to the full XML database or a ZIP with a single `.xml` member. The root is `drugbank`. Every direct `drug` child must have exactly one direct `drugbank-id` marked `primary="true"` or `primary="1"` and a `name`. Optional `drug/@type` sets the class. `synonyms/synonym` with absent/empty language or `language="English"`/`"en"` supplies aliases, case-insensitively. A direct `unii` element supplies a UNII key when it holds ten uppercase letters/digits. Other nonempty values are dropped and counted on stderr. Archive members under `__MACOSX/` or named `._*` are ignored. Nested product names, salts and their UNIIs refer to separate records. [DrugBank releases](https://go.drugbank.com/releases)
+Set `path` to the full XML database or a ZIP with a single `.xml` member. The root is `drugbank`. Every direct `drug` child must have exactly one direct `drugbank-id` marked `primary="true"` or `primary="1"` and a `name`. Optional `drug/@type` sets the class. `synonyms/synonym` with absent/empty language or `language="English"`/`"en"` supplies aliases, case-insensitively. A direct `unii` element supplies a UNII key when it holds ten uppercase letters/digits. Other nonempty values are dropped and counted on stderr. Archive members under `__MACOSX/` or named `._*` are ignored.
+
+`external-identifiers/external-identifier` entries become keys. Optional `external_identifiers` maps DrugBank resource names to key namespaces; the default maps `RxCUI` to `RxNorm` and keeps `ChEBI`, `PubChem Compound` (`PubChem CID`), `PubChem Substance` (`PubChem SID`), `ChEMBL`, `KEGG Drug`, `KEGG Compound`, `PharmGKB` and `UniProtKB`. An RxCUI must be a positive integer. Salts (`salts/salt`) have their own identities: each becomes a `DrugBank` concept of class `salt` with its `DBSALT` code, name and UNII key, and a `salt_of` edge to its drug. Set `salts: false` to leave them out. Nested product names are not read. [DrugBank releases](https://go.drugbank.com/releases)
 
 ### `drugsfda` and `orange_book` — FDA drug products
 
@@ -140,8 +161,9 @@ One row per supplied alias or eligible source atom. A source may also include th
 | `vocabulary_id_1`, `concept_code_1` **required** | Foreign key to the originating concept. |
 | `predicate` **required** | Directed relationship, such as `has_ingredient`. |
 | `vocabulary_id_2`, `concept_code_2` **required** | Foreign key to the target concept. |
+| `assertion_source` | Authority or source relation that asserts the edge, for example `OMOP Brand name of`, `NCIt` or `DrugBank`. |
 
-For `has_ingredient`, endpoint 1 is the product or other containing concept and endpoint 2 is the ingredient. Treat an edge as evidence of that specific relationship. Preserve the direction and the predicate when joining.
+Edges may cross vocabularies, for example SNOMED `maps_to` RxNorm or ATC `atc_rxnorm_pr_lat` RxNorm. For `has_ingredient`, endpoint 1 is the product or other containing concept and endpoint 2 is the ingredient. Treat an edge as evidence of that specific relationship. Preserve the direction and the predicate when joining.
 
 ### `xrefs.csv`
 

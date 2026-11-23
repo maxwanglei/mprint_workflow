@@ -94,6 +94,104 @@ def test_invalid_unii_drops_only_that_link(run_source, read_rows, capsys):
     assert "skipped 1 invalid UNII" in capsys.readouterr().err
 
 
+def test_drugbank_external_identifiers_and_salts(run_source, read_rows, capsys):
+    xml = (
+        '<drugbank xmlns="http://www.drugbank.ca"><drug type="small molecule">'
+        '<drugbank-id primary="true">DB00001</drugbank-id><name>Drug A</name><unii>ABCDEFGHIJ</unii>'
+        '<salts><salt><drugbank-id primary="true">DBSALT000001</drugbank-id>'
+        "<name>Drug A sodium</name><unii>KLMNOPQRST</unii></salt></salts>"
+        "<external-identifiers>"
+        "<external-identifier><resource>RxCUI</resource><identifier>1191</identifier></external-identifier>"
+        "<external-identifier><resource>RxCUI</resource><identifier>not-a-code</identifier></external-identifier>"
+        "<external-identifier><resource>ChEBI</resource><identifier>15365</identifier></external-identifier>"
+        "<external-identifier><resource>Wikipedia</resource><identifier>Drug_A</identifier></external-identifier>"
+        "</external-identifiers></drug></drugbank>"
+    )
+    out = run_source({"format": "drugbank", **NATIVE, "path": "db.xml"}, {"db.xml": xml})
+    concepts = {
+        (r["concept_code"], r["concept_name"], r["concept_class"])
+        for r in read_rows(out, "concepts")
+    }
+    assert concepts == {
+        ("DB00001", "Drug A", "small molecule"),
+        ("DBSALT000001", "Drug A sodium", "salt"),
+    }
+    assert keys(out, read_rows) == [
+        ("DB00001", "ChEBI", "15365"),
+        ("DB00001", "RxNorm", "1191"),
+        ("DB00001", "UNII", "ABCDEFGHIJ"),
+        ("DBSALT000001", "UNII", "KLMNOPQRST"),
+    ]
+    [edge] = read_rows(out, "relationships")
+    assert (edge["concept_code_1"], edge["predicate"], edge["concept_code_2"]) == (
+        "DBSALT000001",
+        "salt_of",
+        "DB00001",
+    )
+    assert "skipped 1 invalid UNII or identifier" in capsys.readouterr().err
+
+
+def test_drugbank_salts_can_be_left_out(run_source, read_rows):
+    xml = (
+        '<drugbank xmlns="http://www.drugbank.ca"><drug type="biotech">'
+        '<drugbank-id primary="true">DB00002</drugbank-id><name>Drug B</name>'
+        "<salts><salt><drugbank-id>DBSALT000002</drugbank-id><name>Drug B acetate</name></salt></salts>"
+        "</drug></drugbank>"
+    )
+    out = run_source(
+        {"format": "drugbank", **NATIVE, "path": "db.xml", "salts": False}, {"db.xml": xml}
+    )
+    assert [r["concept_code"] for r in read_rows(out, "concepts")] == ["DB00002"]
+    assert read_rows(out, "relationships") == []
+
+
+def test_gsrs_records_add_rxnorm_ncit_and_pubchem_keys(run_source, read_rows):
+    names = "NAME\tTYPE\tUNII\tDISPLAY_NAME\nAspirin\tcn\tR16CO5Y76E\tASPIRIN\n"
+    records = (
+        "UNII\tDISPLAY_NAME\tRN\tEC\tNCIT\tRXCUI\tPUBCHEM\n"
+        "R16CO5Y76E\tASPIRIN\t50-78-2\t\tC287\t1191\t2244\n"
+        "ZZZZZZZZZZ\tNOT IN NAMES\t\t\tC1\t1\t1\n"
+        "R16CO5Y76E\tASPIRIN\t\t\tbad\t\t\n"
+    )
+    out = run_source(
+        {"format": "gsrs", **NATIVE, "path": "UNIIs.zip", "records": "UNII_Data.zip"},
+        {
+            "UNIIs.zip": zip_bytes({"UNII_Names_4Aug2026.txt": names}),
+            "UNII_Data.zip": zip_bytes(
+                {"UNII_Records_4Aug2026.txt": records, "Legacy UNIIs.txt": ""}
+            ),
+        },
+    )
+    assert keys(out, read_rows) == [
+        ("R16CO5Y76E", "NCIt", "C287"),
+        ("R16CO5Y76E", "PubChem CID", "2244"),
+        ("R16CO5Y76E", "RxNorm", "1191"),
+    ]
+    assert {r["assertion_source"] for r in read_rows(out, "xrefs")} == {"FDA UNII Records"}
+
+
+def test_ncit_parents_become_is_a_edges_within_the_selection(run_source, read_rows):
+    thesaurus = (
+        "C1\tiri\tC2|C3\tDrug A\t\t\t\tPharmacologic Substance\n"
+        "C2\tiri\tC4\tDrug class\t\t\t\tPharmacologic Substance\n"
+        "C3\tiri\t\tA gene\t\t\t\tGene or Genome\n"
+    )
+    out = run_source(
+        {
+            "format": "ncit",
+            **NATIVE,
+            "path": "t.txt",
+            "semantic_types": ["Pharmacologic Substance"],
+        },
+        {"t.txt": thesaurus},
+    )
+    edges = [
+        (r["concept_code_1"], r["predicate"], r["concept_code_2"])
+        for r in read_rows(out, "relationships")
+    ]
+    assert edges == [("C1", "is_a", "C2")]
+
+
 def test_gsrs_zip_with_readme_member(run_source, read_rows):
     names = "NAME\tTYPE\tUNII\tDISPLAY_NAME\n" + "Aspirin\tcn\tR16CO5Y76E\tASPIRIN\n" * 2
     data = zip_bytes({"UNII_Names_4Aug2026.txt": names, "READ ME UNII Lists.txt": "readme"})
@@ -172,9 +270,15 @@ def test_umls_spills_under_run_scratch(run_source, monkeypatch, tmp_path):
     assert seen[0] is not None and Path(seen[0]).is_relative_to(tmp_path)
 
 
+def keys(out, read_rows):
+    return sorted(
+        (r["concept_code"], r["key_type"], r["key_value"]) for r in read_rows(out, "xrefs")
+    )
+
+
 def test_code_split_outside_semantic_filter_is_not_one_to_one(run_source, read_rows):
     out = run_source(
-        {**UMLS, "mrsty": "s.rrf", "semantic_types": ["T121"]},
+        {**UMLS, "mrsty": "s.rrf", "semantic_types": ["T121"], "code_identity": "any"},
         {"m.rrf": SPLIT_CODE, "s.rrf": SEMANTIC_TYPES},
     )
     assert [r["concept_code"] for r in read_rows(out, "concepts")] == ["C1"]
@@ -182,9 +286,48 @@ def test_code_split_outside_semantic_filter_is_not_one_to_one(run_source, read_r
 
 
 def test_code_split_outside_tty_filter_is_not_one_to_one(run_source, read_rows):
-    out = run_source({**UMLS, "ttys": ["PT"]}, {"m.rrf": SPLIT_CODE})
+    out = run_source({**UMLS, "ttys": ["PT"], "code_identity": "any"}, {"m.rrf": SPLIT_CODE})
     assert [r["concept_code"] for r in read_rows(out, "concepts")] == ["C1"]
     assert [r["key_type"] for r in read_rows(out, "xrefs")] == ["UMLS_CUI"]
+
+
+def test_code_follows_its_preferred_term_across_a_split(run_source, read_rows):
+    out = run_source(
+        {**UMLS, "mrsty": "s.rrf", "semantic_types": ["T121"]},
+        {"m.rrf": SPLIT_CODE, "s.rrf": SEMANTIC_TYPES},
+    )
+    assert keys(out, read_rows) == [("C1", "NCIt", "C9"), ("C1", "UMLS_CUI", "C1")]
+
+
+def test_brand_name_filed_under_a_brand_concept_keeps_the_ingredient_key(run_source, read_rows):
+    # NCI files the brand name "Brandex" under its ingredient code C9;
+    # UMLS puts that atom in the brand's own concept C2.
+    mrconso = (
+        "C1|ENG|P|L|PF|S1|Y|A1||||NCI|PT|C9|Drug A||N||\n"
+        "C2|ENG|P|L|PF|S2|Y|A2||||NCI|BN|C9|Brandex||N||\n"
+        "C2|ENG|S|L|PF|S3|N|A3||||RXNORM|BN|222|Brandex||N||\n"
+    )
+    out = run_source({**UMLS, "sources": ["NCI", "RXNORM"]}, {"m.rrf": mrconso})
+    assert keys(out, read_rows) == [
+        ("C1", "NCIt", "C9"),
+        ("C1", "UMLS_CUI", "C1"),
+        ("C2", "RxNorm", "222"),
+        ("C2", "UMLS_CUI", "C2"),
+    ]
+
+
+def test_preferred_term_in_two_concepts_is_still_ambiguous(run_source, read_rows):
+    mrconso = (
+        "C1|ENG|P|L|PF|S1|Y|A1||||NCI|PT|C9|Drug A||N||\n"
+        "C2|ENG|P|L|PF|S1|Y|A2||||NCI|PT|C9|Drug A||N||\n"
+    )
+    out = run_source(UMLS, {"m.rrf": mrconso})
+    assert {r["key_type"] for r in read_rows(out, "xrefs")} == {"UMLS_CUI"}
+
+
+def test_unknown_code_identity_is_rejected(run_source):
+    with pytest.raises(ValueError, match="code_identity"):
+        run_source({**UMLS, "code_identity": "maybe"}, {"m.rrf": SPLIT_CODE})
 
 
 DRUGSFDA = {"format": "drugsfda", **NATIVE, "path": "Products.txt"}
